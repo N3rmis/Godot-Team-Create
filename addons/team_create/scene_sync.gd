@@ -172,7 +172,9 @@ func _process(delta):
 				_pending_resource_properties.remove_at(i)
 
 func _track_changes_throttled():
-	var current_scene = _get_target_scene(scene_path)
+	var current_scene = null
+	if network and network.plugin:
+		current_scene = network.plugin.get_editor_interface().get_edited_scene_root()
 	if not current_scene:
 		return
 
@@ -188,7 +190,7 @@ func _track_changes_throttled():
 		_check_all_nodes(current_scene, current_scene)
 	else:
 		# ONLY track changes for selected nodes to save massive performance costs
-		var selected = editor.get_selection().get_selected_nodes()
+		var selected = network.plugin.get_editor_interface().get_selection().get_selected_nodes()
 		for node in selected:
 			_check_single_node_changes(node)
 
@@ -313,7 +315,9 @@ func update_peer_selection(peer_id: int, selected_ids: Array, scene_path: String
 					node.add_child(outline)
 
 func clear_peer_selections(peer_id: int):
-	var current_scene = _get_target_scene(scene_path)
+	var current_scene = null
+	if network and network.plugin:
+		current_scene = network.plugin.get_editor_interface().get_edited_scene_root()
 	if not current_scene:
 		return
 
@@ -457,7 +461,9 @@ func _on_node_added(node: Node):
 	if node.name.begins_with("@") or node.name.begins_with("TeamCreateSelectionOutline_") or node.name.begins_with("TeamCreateCursor"):
 		return
 
-	var current_scene = _get_target_scene(scene_path)
+	var current_scene = null
+	if network and network.plugin:
+		current_scene = network.plugin.get_editor_interface().get_edited_scene_root()
 	if not current_scene:
 		return
 
