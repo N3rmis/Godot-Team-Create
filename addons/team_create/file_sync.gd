@@ -3,7 +3,7 @@ extends Node
 
 var network: Node
 var _is_syncing_files = false
-var _scan_timer: SceneTreeTimer
+var _scan_timer = null
 var _pending_files_to_receive = 0
 var downloading_files: Array = []
 var _sync_blocker: ColorRect

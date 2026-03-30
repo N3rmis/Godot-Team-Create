@@ -27,17 +27,19 @@ var _local_username = ""
 func _ready():
 	name = "TeamCreateNetwork"
 	# Load sync modules
-	var file_sync_script = preload("res://addons/team_create/file_sync.gd")
-	file_sync = file_sync_script.new()
-	file_sync.name = "TeamCreateFileSync"
-	file_sync.network = self
-	add_child(file_sync)
+	var file_sync_script = load("res://addons/team_create/file_sync.gd")
+	if file_sync_script:
+		file_sync = file_sync_script.new()
+		file_sync.name = "TeamCreateFileSync"
+		file_sync.network = self
+		add_child(file_sync)
 
-	var scene_sync_script = preload("res://addons/team_create/scene_sync.gd")
-	scene_sync = scene_sync_script.new()
-	scene_sync.name = "TeamCreateSceneSync"
-	scene_sync.network = self
-	add_child(scene_sync)
+	var scene_sync_script = load("res://addons/team_create/scene_sync.gd")
+	if scene_sync_script:
+		scene_sync = scene_sync_script.new()
+		scene_sync.name = "TeamCreateSceneSync"
+		scene_sync.network = self
+		add_child(scene_sync)
 
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
