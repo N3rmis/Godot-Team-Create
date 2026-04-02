@@ -1,6 +1,8 @@
 @tool
 extends Node
 
+const SUPPORTED_EXTENSIONS = {"gd": true, "cs": true, "tscn": true, "scn": true, "png": true, "jpg": true, "wav": true, "ogg": true}
+
 var network: Node
 var _is_syncing_files = false
 var _scan_timer = null
@@ -121,7 +123,7 @@ func get_all_files(dir_path: String, exclude_dirs: Array = ["res://.godot", "res
 
 					# Only override if it looks like Godot was trying to create an entirely new temporary resource
 					# rather than overwriting an existing script or asset
-					if not real_path.get_extension() in ["gd", "cs", "tscn", "scn", "png", "jpg", "wav", "ogg"]:
+					if not SUPPORTED_EXTENSIONS.has(real_path.get_extension()):
 						if not real_path.ends_with(".res") and not real_path.ends_with(".tres"):
 							real_path += ".res"
 
@@ -282,7 +284,7 @@ func receive_file(path: String, bytes: PackedByteArray, is_final: bool = true):
 	# Convert temporary files based on origin
 	if path.ends_with(".tmp"):
 		var real_path = path.trim_suffix(".tmp")
-		if not real_path.get_extension() in ["gd", "cs", "tscn", "scn", "png", "jpg", "wav", "ogg"]:
+		if not SUPPORTED_EXTENSIONS.has(real_path.get_extension()):
 			if not real_path.ends_with(".res") and not real_path.ends_with(".tres"):
 				real_path += ".res"
 		path = real_path
