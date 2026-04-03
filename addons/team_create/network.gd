@@ -1,6 +1,9 @@
 @tool
 extends Node
 
+const ADJECTIVES = ["Fast", "Cool", "Smart", "Brave", "Wild", "Quick", "Sly", "Bold"]
+const NOUNS = ["Cat", "Dog", "Fox", "Bear", "Wolf", "Hawk", "Owl", "Lion"]
+
 const PORT = 12345
 const MAX_CLIENTS = 10
 
@@ -262,6 +265,14 @@ func _process(_delta: float) -> void:
 			webrtc_peer.poll()
 
 
+func _get_random_color(rng: RandomNumberGenerator) -> Color:
+	return Color.from_hsv(rng.randf(), 0.8, 0.9)
+
+
+func _get_random_name(rng: RandomNumberGenerator) -> String:
+	return ADJECTIVES[rng.randi() % ADJECTIVES.size()] + NOUNS[rng.randi() % NOUNS.size()] + str(rng.randi() % 100)
+
+
 func _generate_peer_info(id: int) -> Dictionary:
 	var rng = RandomNumberGenerator.new()
 	rng.seed = id
@@ -278,11 +289,9 @@ func _generate_peer_info(id: int) -> Dictionary:
 		_assigned_colors.append(color)
 		_color_assignment_counter += 1
 	else:
-		color = Color.from_hsv(rng.randf(), 0.8, 0.9)
+		color = _get_random_color(rng)
 
-	var adjectives = ["Fast", "Cool", "Smart", "Brave", "Wild", "Quick", "Sly", "Bold"]
-	var nouns = ["Cat", "Dog", "Fox", "Bear", "Wolf", "Hawk", "Owl", "Lion"]
-	var username = _local_username if id == 1 and _local_username != "" else adjectives[rng.randi() % adjectives.size()] + nouns[rng.randi() % nouns.size()] + str(rng.randi() % 100)
+	var username = _local_username if id == 1 and _local_username != "" else _get_random_name(rng)
 	if id == 1 and is_standalone_server:
 		username = "Server"
 	var info = {"username": username, "color": color}
@@ -293,10 +302,8 @@ func _generate_peer_info(id: int) -> Dictionary:
 func _get_default_peer_info(id: int) -> Dictionary:
 	var rng = RandomNumberGenerator.new()
 	rng.seed = id
-	var color = Color.from_hsv(rng.randf(), 0.8, 0.9)
-	var adjectives = ["Fast", "Cool", "Smart", "Brave", "Wild", "Quick", "Sly", "Bold"]
-	var nouns = ["Cat", "Dog", "Fox", "Bear", "Wolf", "Hawk", "Owl", "Lion"]
-	var username = _local_username if id == multiplayer.get_unique_id() and _local_username != "" else adjectives[rng.randi() % adjectives.size()] + nouns[rng.randi() % nouns.size()] + str(rng.randi() % 100)
+	var color = _get_random_color(rng)
+	var username = _local_username if id == multiplayer.get_unique_id() and _local_username != "" else _get_random_name(rng)
 	return {"username": username, "color": color}
 
 # User Info management
