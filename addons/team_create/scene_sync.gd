@@ -1,5 +1,6 @@
 @tool
 extends Node
+# TODO: Evaluate replacing manual dictionary serialization with Godot's built-in MultiplayerSynchronizer
 
 var network: Node
 var _last_scene_path: String = ""
@@ -1047,6 +1048,7 @@ func update_peer_cursor_2d(peer_id: int, pos: Vector2, scene_path: String = ""):
 		# Let's set it to global_position of a Node2D
 		cursor.position = pos
 
+# TODO: Implement cursor object pooling instead of repeatedly instantiating/freeing cursor meshes
 func _get_or_create_peer_cursor_3d(peer_id: int, current_scene: Node) -> Node3D:
 	var group_name = "TeamCreateCursor3D_" + str(peer_id)
 	var nodes = current_scene.get_tree().get_nodes_in_group(group_name)

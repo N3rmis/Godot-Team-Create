@@ -353,6 +353,7 @@ func _on_webrtc_download_completed(result: int, response_code: int, headers: Pac
 		downloading_webrtc = false
 	http_request.queue_free()
 
+# TODO: Add proper error handling/cleanup if ZIP extraction fails mid-way due to lack of disk space
 func _extract_webrtc(zip_path: String):
 	var zip_reader = ZIPReader.new()
 	var err = zip_reader.open(zip_path)
@@ -412,6 +413,7 @@ func webrtc_host():
 		_download_webrtc()
 		return
 
+	# TODO: Allow users to specify custom STUN/TURN servers in EditorSettings instead of hardcoding Google STUN
 	var err = webrtc_connection.initialize({
 		"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
 	})

@@ -139,6 +139,7 @@ echo Starting Team Create Server...
 pause
 """
 
+# TODO: Return boolean success/failure to abort export if file copy fails midway (e.g. permission denied)
 static func copy_dir_recursive(from_path: String, to_path: String, ignore_paths: Array = []) -> void:
 	if not DirAccess.dir_exists_absolute(from_path):
 		return

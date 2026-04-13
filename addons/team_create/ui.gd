@@ -171,6 +171,7 @@ func _init() -> void:
 	lan_container = VBoxContainer.new()
 	conn_vbox.add_child(lan_container)
 
+	# TODO: Save recently used IP addresses in EditorSettings so users don't have to retype them
 	ip_edit = LineEdit.new()
 	ip_edit.text = "127.0.0.1"
 	ip_edit.placeholder_text = "Host IP Address (e.g., 127.0.0.1)"
@@ -543,6 +544,7 @@ func _on_export_dir_selected(dir: String) -> void:
 	if network and network.plugin:
 		var exporter_script = load("res://addons/team_create/server_exporter.gd")
 		if exporter_script:
+			# TODO: Add AcceptDialog popup on failure instead of just printing to console
 			exporter_script.export_server(dir, self)
 		else:
 			print("Failed to load server_exporter.gd")
