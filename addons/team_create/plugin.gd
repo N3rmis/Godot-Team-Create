@@ -92,6 +92,7 @@ func _http_request_completed(result: int, response_code: int, headers: PackedStr
 	http_request.queue_free()
 var downloading = false
 
+# TODO: Use AcceptDialog to prompt user instead of just changing button text
 func _prompt_update() -> void:
 	if downloading:
 		return

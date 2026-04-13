@@ -241,6 +241,7 @@ func request_file(path: String):
 			rpc_id(sender_id, "receive_file", path, bytes, true)
 			return
 
+		# TODO: Abstract chunking logic into a reusable helper for large RPC data transfers
 		if network and network.is_webrtc:
 			var chunk_size = 60000
 			var offset = 0
@@ -372,6 +373,7 @@ func receive_file(path: String, bytes: PackedByteArray, is_final: bool = true):
 			sync_completed.emit()
 
 
+# TODO: Handle cases where a local file is deleted while offline/disconnected before broadcasting
 @rpc("any_peer", "reliable")
 func remote_delete_file(path: String):
 	if multiplayer.get_remote_sender_id() != 1:
