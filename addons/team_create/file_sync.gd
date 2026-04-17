@@ -86,8 +86,7 @@ func sync_all_files():
 	for path in all_files:
 		if path.begins_with("res://addons/team_create"):
 			continue
-		if FileAccess.file_exists(path):
-			file_hashes[path] = FileAccess.get_md5(path)
+		file_hashes[path] = FileAccess.get_md5(path)
 	rpc("compare_and_sync_files", file_hashes)
 	_is_syncing_files = false
 
@@ -98,8 +97,7 @@ func sync_all_files_to_peer(id: int):
 		for path in all_files:
 			if path.begins_with("res://addons/team_create"):
 				continue
-			if FileAccess.file_exists(path):
-				file_hashes[path] = FileAccess.get_md5(path)
+			file_hashes[path] = FileAccess.get_md5(path)
 		rpc_id(id, "compare_and_sync_files", file_hashes)
 
 func get_all_files(dir_path: String, exclude_dirs: Array = ["res://.godot", "res://webrtc"]) -> Array:
@@ -167,8 +165,7 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 	for path in local_files:
 		if path.begins_with("res://addons/team_create"):
 			continue
-		if FileAccess.file_exists(path):
-			local_hashes[path] = FileAccess.get_md5(path)
+		local_hashes[path] = FileAccess.get_md5(path)
 
 	# Find files to delete (only allow the server to delete files to prevent clients wiping the server)
 	if sender_id == 1:

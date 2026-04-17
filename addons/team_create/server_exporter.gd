@@ -4,30 +4,22 @@ extends Node
 const SERVER_SCRIPT_TEMPLATE = """extends Node
 
 class DummyEditorSettings:
-	func has_setting(_name): return false
-	func get_setting(_name): return ""
-	func set_setting(_name, _val):
-		# No-op in headless
-		pass
-	func get_project_metadata(_section, _key, default): return default
-	func set_project_metadata(_section, _key, _val):
-		# No-op in headless
-		pass
+	func has_setting(name): return false
+	func get_setting(name): return ""
+	func set_setting(name, val): pass
+	func add_property_info(info): pass
+	func set_initial_value(name, value, update_current): pass
+	func get_project_metadata(section, key, default): return default
+	func set_project_metadata(section, key, val): pass
 
 class DummyEditorFileSystem:
 	signal filesystem_changed
 	signal sources_changed
 	func is_scanning(): return false
-	func scan():
-		# No-op in headless
-		pass
+	func scan(): pass # No-op in headless
 	func get_filesystem(): return self
-	func scan_sources():
-		# No-op in headless
-		pass
-	func update_file(_path):
-		# No-op in headless
-		pass
+	func scan_sources(): pass # No-op in headless
+	func update_file(_path): pass # No-op in headless
 
 class DummyEditorSelection:
 	signal selection_changed
@@ -55,55 +47,29 @@ class DummyEditorInterface:
 		var n = Node.new()
 		n.name = "DummyMainScreen"
 		return n
-	func open_scene_from_path(_path):
-		# No-op in headless
-		pass
-	func close_scene():
-		# No-op in headless
-		pass
-	func reload_scene_from_path(_path):
-		# No-op in headless
-		pass
-	func save_scene():
-		# No-op in headless
-		pass
-	func mark_scene_as_unsaved():
-		# No-op in headless
-		pass
+	func open_scene_from_path(_path): pass # No-op in headless
+	func close_scene(): pass # No-op in headless
+	func reload_scene_from_path(_path): pass # No-op in headless
+	func save_scene(): pass # No-op in headless
+	func mark_scene_as_unsaved(): pass # No-op in headless
 
 class DummyEditorUndoRedoManager:
 	signal version_changed
 	signal history_changed
-	func create_action(_name, _merge_mode=0, _custom_context=null, _undo_custom_context=false):
-		# No-op in headless
-		pass
-	func add_do_property(_object, _property, _value):
-		# No-op in headless
-		pass
-	func add_undo_property(_object, _property, _value):
-		# No-op in headless
-		pass
-	func commit_action(_execute=true):
-		# No-op in headless
-		pass
+	func create_action(_name, _merge_mode=0, _custom_context=null, _undo_custom_context=false): pass # No-op in headless
+	func add_do_property(_object, _property, _value): pass # No-op in headless
+	func add_undo_property(_object, _property, _value): pass # No-op in headless
+	func commit_action(_execute=true): pass # No-op in headless
 
 class DummyEditorPlugin extends Node:
 	var ei = DummyEditorInterface.new()
 	var dummy_undo_redo = DummyEditorUndoRedoManager.new()
 	func get_editor_interface(): return ei
 	func get_undo_redo(): return dummy_undo_redo
-	func add_control_to_dock(_slot, _control):
-		# No-op in headless
-		pass
-	func remove_control_from_docks(_control):
-		# No-op in headless
-		pass
-	func download_update():
-		# No-op in headless
-		pass
-	func check_for_updates():
-		# No-op in headless
-		pass
+	func add_control_to_dock(_slot, _control): pass # No-op in headless
+	func remove_control_from_docks(_control): pass # No-op in headless
+	func download_update(): pass # No-op in headless
+	func check_for_updates(): pass # No-op in headless
 
 
 func _ready():

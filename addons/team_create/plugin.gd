@@ -77,7 +77,7 @@ func _http_request_completed(result: int, response_code: int, headers: PackedStr
 		var current_version = get_current_version()
 		if latest_version != "" and latest_version != current_version:
 			print("Team Create update available: " + latest_version + " (Current: " + current_version + ")")
-			_prompt_update()
+			_prompt_update(latest_version)
 		else:
 			print("Team Create is up to date.")
 			if dock and dock.update_btn:
@@ -92,14 +92,25 @@ func _http_request_completed(result: int, response_code: int, headers: PackedStr
 	http_request.queue_free()
 var downloading = false
 
-# TODO: Use AcceptDialog to prompt user instead of just changing button text
-func _prompt_update() -> void:
+func _prompt_update(latest_version: String = "") -> void:
 	if downloading:
 		return
 	if dock and dock.update_btn:
 		dock.update_btn.text = "Update Available!"
 		dock.update_btn.disabled = false
 		dock.update_btn.add_theme_color_override("font_color", Color.GREEN)
+
+	var dialog = AcceptDialog.new()
+	dialog.title = "Team Create Update Available"
+	if latest_version != "":
+		dialog.dialog_text = "A new version of Godot Team Create (" + latest_version + ") is available.\nClick the update button in the dock to install it."
+	else:
+		dialog.dialog_text = "A new version of Godot Team Create is available.\nClick the update button in the dock to install it."
+
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
+	get_editor_interface().get_base_control().add_child(dialog)
+	dialog.popup_centered()
 
 func _reset_update_button() -> void:
 	downloading = false
@@ -149,16 +160,19 @@ func _extract_and_apply_update(zip_path: String) -> void:
 		if f.ends_with("/"):
 			continue # Directory
 
-		# Validate path to prevent ZipSlip traversal
-		if ".." in f:
-			printerr("Security Warning: Traversal attempt detected in update zip: ", f)
-			continue
+		# Normalize path separators
+		var f_norm = f.replace("\\", "/")
 
 		# Ensure it's inside the addons/team_create folder
 		# GitHub zips put everything inside a root folder, e.g., "Godot-Team-Create-main/addons/team_create/..."
-		var parts = f.split("/")
+		var parts = f_norm.split("/")
 		if parts.size() > 2 and parts[1] == "addons" and parts[2] == "team_create":
-			var dest_path = "res://" + "/".join(parts.slice(1, parts.size()))
+			var dest_path = ("res://" + "/".join(parts.slice(1, parts.size()))).simplify_path()
+
+			# Validate path to prevent ZipSlip traversal and absolute path escapes
+			if not dest_path.begins_with("res://addons/team_create/"):
+				printerr("Security Warning: Traversal attempt detected in update zip: ", f)
+				continue
 
 			# Ensure directory exists
 			var dest_dir = dest_path.get_base_dir()
