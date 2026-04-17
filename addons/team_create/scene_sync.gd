@@ -41,19 +41,25 @@ func _get_target_scene(scene_path: String) -> Node:
 func _save_server_tracked_scenes():
 	if not network.get("is_standalone_server"):
 		return
+
+	var cached_outlines = []
+	var cached_cursors = []
+	var tree = get_tree()
+	if tree:
+		cached_outlines = tree.get_nodes_in_group("TeamCreateSelectionOutlines")
+		cached_cursors = tree.get_nodes_in_group("TeamCreateCursors")
+
 	for path in _server_tracked_scenes:
 		var scene_node = _server_tracked_scenes[path]
 		if is_instance_valid(scene_node):
 			# Temporarily remove outlines
 			var outlines = []
-			var tree = scene_node.get_tree()
-			if tree:
-				for node in tree.get_nodes_in_group("TeamCreateSelectionOutlines"):
-					if is_instance_valid(node) and node.is_ancestor_of(scene_node):
-						outlines.append({"node": node, "parent": node.get_parent()})
-				for node in tree.get_nodes_in_group("TeamCreateCursors"):
-					if is_instance_valid(node) and node.is_ancestor_of(scene_node):
-						outlines.append({"node": node, "parent": node.get_parent()})
+			for node in cached_outlines:
+				if is_instance_valid(node) and node.is_ancestor_of(scene_node):
+					outlines.append({"node": node, "parent": node.get_parent()})
+			for node in cached_cursors:
+				if is_instance_valid(node) and node.is_ancestor_of(scene_node):
+					outlines.append({"node": node, "parent": node.get_parent()})
 
 			for data in outlines:
 				data["parent"].remove_child(data["node"])
