@@ -28,6 +28,7 @@ var local_sdp = ""
 var _local_username = ""
 
 func _ready():
+	call_deferred("_init_editor_settings")
 	name = "TeamCreateNetwork"
 	# Load sync modules
 	var file_sync_script = load("res://addons/team_create/file_sync.gd")
@@ -413,9 +414,8 @@ func webrtc_host():
 		_download_webrtc()
 		return
 
-	# TODO: Allow users to specify custom STUN/TURN servers in EditorSettings instead of hardcoding Google STUN
 	var err = webrtc_connection.initialize({
-		"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+		"iceServers": _get_stun_servers()
 	})
 
 	if err != OK:
@@ -457,7 +457,7 @@ func webrtc_join():
 		return
 
 	var err = webrtc_connection.initialize({
-		"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+		"iceServers": _get_stun_servers()
 	})
 
 	if err != OK:
@@ -568,3 +568,43 @@ func webrtc_confirm(encoded_str: String):
 				webrtc_connection.add_ice_candidate(cand["media"], cand["index"], cand["name"])
 			else:
 				print("Invalid ICE candidate format.")
+
+func _init_editor_settings():
+	if Engine.is_editor_hint() and plugin and plugin.has_method("get_editor_interface"):
+		var editor_interface = plugin.get_editor_interface()
+		if editor_interface and editor_interface.has_method("get_editor_settings"):
+			var settings = editor_interface.get_editor_settings()
+			if settings:
+				var setting_name = "network/team_create/stun_server"
+				var default_val = "stun:stun.l.google.com:19302"
+				if not settings.has_setting(setting_name):
+					settings.set_setting(setting_name, default_val)
+				settings.set_initial_value(setting_name, default_val, false)
+				var property_info = {
+					"name": setting_name,
+					"type": TYPE_STRING,
+					"hint": PROPERTY_HINT_NONE,
+					"hint_string": "Comma separated list of STUN/TURN servers"
+				}
+				settings.add_property_info(property_info)
+
+func _get_stun_servers() -> Array:
+	var default_servers = [{"urls": ["stun:stun.l.google.com:19302"]}]
+
+	if Engine.is_editor_hint() and plugin and plugin.has_method("get_editor_interface"):
+		var editor_interface = plugin.get_editor_interface()
+		if editor_interface and editor_interface.has_method("get_editor_settings"):
+			var settings = editor_interface.get_editor_settings()
+			if settings and settings.has_setting("network/team_create/stun_server"):
+				var setting_val = settings.get_setting("network/team_create/stun_server")
+				if typeof(setting_val) == TYPE_STRING and setting_val.strip_edges() != "":
+					var server_list = []
+					var parts = setting_val.split(",")
+					for part in parts:
+						var url = part.strip_edges()
+						if url != "":
+							server_list.append(url)
+					if server_list.size() > 0:
+						return [{"urls": server_list}]
+
+	return default_servers

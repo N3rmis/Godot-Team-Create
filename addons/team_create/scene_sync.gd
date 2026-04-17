@@ -1027,6 +1027,9 @@ var _local_2d_cursor_pos: Vector2 = Vector2.ZERO
 var _has_3d_cursor = false
 var _has_2d_cursor = false
 
+var _peer_cursors_3d = {}
+var _peer_cursors_2d = {}
+
 
 func _sync_cursor_throttled(delta):
 	_last_cursor_sync += delta
@@ -1085,6 +1088,7 @@ func _get_or_create_peer_cursor_3d(peer_id: int, current_scene: Node) -> Node3D:
 	var cursor_name = _get_cursor_3d_group_name(peer_id)
 	var nodes = current_scene.get_tree().get_nodes_in_group(group_name)
 	if nodes.size() > 0 and is_instance_valid(nodes[0]):
+		_peer_cursors_3d[peer_id] = nodes[0]
 		return nodes[0]
 
 	var cursor = Node3D.new()
@@ -1147,6 +1151,7 @@ func _get_or_create_peer_cursor_3d(peer_id: int, current_scene: Node) -> Node3D:
 	cursor.add_child(label)
 
 	current_scene.add_child(cursor)
+	_peer_cursors_3d[peer_id] = cursor
 	return cursor
 
 func _get_or_create_peer_cursor_2d(peer_id: int, current_scene: Node) -> Node2D:
@@ -1154,6 +1159,7 @@ func _get_or_create_peer_cursor_2d(peer_id: int, current_scene: Node) -> Node2D:
 	var cursor_name = _get_cursor_2d_group_name(peer_id)
 	var nodes = current_scene.get_tree().get_nodes_in_group(group_name)
 	if nodes.size() > 0 and is_instance_valid(nodes[0]):
+		_peer_cursors_2d[peer_id] = nodes[0]
 		return nodes[0]
 
 	var cursor = Node2D.new()
@@ -1184,6 +1190,7 @@ func _get_or_create_peer_cursor_2d(peer_id: int, current_scene: Node) -> Node2D:
 
 	cursor.add_child(poly)
 	current_scene.add_child(cursor)
+	_peer_cursors_2d[peer_id] = cursor
 	return cursor
 
 func _clear_peer_cursor(peer_id: int):
@@ -1203,6 +1210,8 @@ func _clear_peer_cursor_2d(peer_id: int, current_scene: Node):
 		if is_instance_valid(node): node.queue_free()
 
 func clear_all_peer_indicators():
+	_peer_cursors_3d.clear()
+	_peer_cursors_2d.clear()
 	var editor = network.plugin.get_editor_interface()
 	var current_scene = editor.get_edited_scene_root()
 	if not current_scene:
