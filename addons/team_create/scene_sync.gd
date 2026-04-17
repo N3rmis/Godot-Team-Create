@@ -247,6 +247,9 @@ func _track_selection():
 
 @rpc("any_peer", "reliable")
 func update_peer_selection(peer_id: int, selected_ids: Array, scene_path: String = ""):
+	var outline_group_name = _get_selection_group_name(peer_id)
+	var outline_name = _get_selection_outline_name(peer_id)
+
 	# Add custom selection drawing logic
 	var color = network.get_user_color(peer_id)
 	var current_scene = _get_target_scene(scene_path)
@@ -256,7 +259,7 @@ func update_peer_selection(peer_id: int, selected_ids: Array, scene_path: String
 	# Clear previous indicators globally for this peer in the current scene
 	var tree = current_scene.get_tree()
 	if tree:
-		for node in tree.get_nodes_in_group("TeamCreateSelectionOutlines_" + str(peer_id)):
+		for node in tree.get_nodes_in_group(outline_group_name):
 			if is_instance_valid(node):
 				node.queue_free()
 
@@ -270,9 +273,9 @@ func update_peer_selection(peer_id: int, selected_ids: Array, scene_path: String
 		if node:
 			if node is Node3D:
 				var outline = MeshInstance3D.new()
-				outline.name = "TeamCreateSelectionOutline_" + str(peer_id)
+				outline.name = outline_name
 				outline.set_meta("team_create_outline_peer", peer_id)
-				outline.add_to_group("TeamCreateSelectionOutlines_" + str(peer_id))
+				outline.add_to_group(outline_group_name)
 				outline.add_to_group("TeamCreateSelectionOutlines")
 				var mat = StandardMaterial3D.new()
 				mat.albedo_color = color
@@ -296,9 +299,9 @@ func update_peer_selection(peer_id: int, selected_ids: Array, scene_path: String
 
 			elif node is Node2D or node is Control:
 				var outline = ColorRect.new()
-				outline.name = "TeamCreateSelectionOutline_" + str(peer_id)
+				outline.name = outline_name
 				outline.set_meta("team_create_outline_peer", peer_id)
-				outline.add_to_group("TeamCreateSelectionOutlines_" + str(peer_id))
+				outline.add_to_group(outline_group_name)
 				outline.add_to_group("TeamCreateSelectionOutlines")
 				outline.color = color
 				outline.color.a = 0.5
@@ -316,6 +319,7 @@ func update_peer_selection(peer_id: int, selected_ids: Array, scene_path: String
 					node.add_child(outline)
 
 func clear_peer_selections(peer_id: int):
+	var outline_group_name = _get_selection_group_name(peer_id)
 	var current_scene = null
 	if network and network.plugin:
 		current_scene = network.plugin.get_editor_interface().get_edited_scene_root()
@@ -324,7 +328,7 @@ func clear_peer_selections(peer_id: int):
 
 	var tree = current_scene.get_tree()
 	if tree:
-		for node in tree.get_nodes_in_group("TeamCreateSelectionOutlines_" + str(peer_id)):
+		for node in tree.get_nodes_in_group(outline_group_name):
 			if is_instance_valid(node):
 				node.queue_free()
 
@@ -988,6 +992,33 @@ func receive_scene_state(path: String, bytes: PackedByteArray, is_final: bool = 
 					)
 
 
+
+# Dictionary caches to avoid repeated string concatenation and StringName allocations
+var _cached_selection_group_names = {}
+var _cached_selection_outline_names = {}
+var _cached_cursor_3d_group_names = {}
+var _cached_cursor_2d_group_names = {}
+
+func _get_selection_group_name(peer_id: int) -> StringName:
+	if not _cached_selection_group_names.has(peer_id):
+		_cached_selection_group_names[peer_id] = StringName("TeamCreateSelectionOutlines_" + str(peer_id))
+	return _cached_selection_group_names[peer_id]
+
+func _get_selection_outline_name(peer_id: int) -> StringName:
+	if not _cached_selection_outline_names.has(peer_id):
+		_cached_selection_outline_names[peer_id] = StringName("TeamCreateSelectionOutline_" + str(peer_id))
+	return _cached_selection_outline_names[peer_id]
+
+func _get_cursor_3d_group_name(peer_id: int) -> StringName:
+	if not _cached_cursor_3d_group_names.has(peer_id):
+		_cached_cursor_3d_group_names[peer_id] = StringName("TeamCreateCursor3D_" + str(peer_id))
+	return _cached_cursor_3d_group_names[peer_id]
+
+func _get_cursor_2d_group_name(peer_id: int) -> StringName:
+	if not _cached_cursor_2d_group_names.has(peer_id):
+		_cached_cursor_2d_group_names[peer_id] = StringName("TeamCreateCursor2D_" + str(peer_id))
+	return _cached_cursor_2d_group_names[peer_id]
+
 # Tracking cursor positions
 var _last_cursor_sync = 0.0
 const CURSOR_SYNC_INTERVAL = 0.05
@@ -1053,19 +1084,15 @@ func update_peer_cursor_2d(peer_id: int, pos: Vector2, scene_path: String = ""):
 
 # TODO: Implement cursor object pooling instead of repeatedly instantiating/freeing cursor meshes
 func _get_or_create_peer_cursor_3d(peer_id: int, current_scene: Node) -> Node3D:
-	if _peer_cursors_3d.has(peer_id):
-		var c = _peer_cursors_3d[peer_id]
-		if is_instance_valid(c) and c.is_inside_tree():
-			return c
-
-	var group_name = "TeamCreateCursor3D_" + str(peer_id)
+	var group_name = _get_cursor_3d_group_name(peer_id)
+	var cursor_name = _get_cursor_3d_group_name(peer_id)
 	var nodes = current_scene.get_tree().get_nodes_in_group(group_name)
 	if nodes.size() > 0 and is_instance_valid(nodes[0]):
 		_peer_cursors_3d[peer_id] = nodes[0]
 		return nodes[0]
 
 	var cursor = Node3D.new()
-	cursor.name = "TeamCreateCursor3D_" + str(peer_id)
+	cursor.name = cursor_name
 	cursor.add_to_group(group_name)
 	cursor.add_to_group("TeamCreateCursors")
 	cursor.set_meta("_edit_lock_", true)
@@ -1128,19 +1155,15 @@ func _get_or_create_peer_cursor_3d(peer_id: int, current_scene: Node) -> Node3D:
 	return cursor
 
 func _get_or_create_peer_cursor_2d(peer_id: int, current_scene: Node) -> Node2D:
-	if _peer_cursors_2d.has(peer_id):
-		var c = _peer_cursors_2d[peer_id]
-		if is_instance_valid(c) and c.is_inside_tree():
-			return c
-
-	var group_name = "TeamCreateCursor2D_" + str(peer_id)
+	var group_name = _get_cursor_2d_group_name(peer_id)
+	var cursor_name = _get_cursor_2d_group_name(peer_id)
 	var nodes = current_scene.get_tree().get_nodes_in_group(group_name)
 	if nodes.size() > 0 and is_instance_valid(nodes[0]):
 		_peer_cursors_2d[peer_id] = nodes[0]
 		return nodes[0]
 
 	var cursor = Node2D.new()
-	cursor.name = "TeamCreateCursor2D_" + str(peer_id)
+	cursor.name = cursor_name
 	cursor.add_to_group(group_name)
 	cursor.add_to_group("TeamCreateCursors")
 	cursor.set_meta("_edit_lock_", true)
@@ -1177,13 +1200,13 @@ func _clear_peer_cursor(peer_id: int):
 	_clear_peer_cursor_2d(peer_id, current_scene)
 
 func _clear_peer_cursor_3d(peer_id: int, current_scene: Node):
-	_peer_cursors_3d.erase(peer_id)
-	for node in current_scene.get_tree().get_nodes_in_group("TeamCreateCursor3D_" + str(peer_id)):
+	var group_name = _get_cursor_3d_group_name(peer_id)
+	for node in current_scene.get_tree().get_nodes_in_group(group_name):
 		if is_instance_valid(node): node.queue_free()
 
 func _clear_peer_cursor_2d(peer_id: int, current_scene: Node):
-	_peer_cursors_2d.erase(peer_id)
-	for node in current_scene.get_tree().get_nodes_in_group("TeamCreateCursor2D_" + str(peer_id)):
+	var group_name = _get_cursor_2d_group_name(peer_id)
+	for node in current_scene.get_tree().get_nodes_in_group(group_name):
 		if is_instance_valid(node): node.queue_free()
 
 func clear_all_peer_indicators():
@@ -1208,7 +1231,8 @@ func _update_cursor_username(peer_id: int, username: String):
 	if not current_scene: return
 	var tree = current_scene.get_tree()
 	if not tree: return
-	var nodes = tree.get_nodes_in_group("TeamCreateCursor3D_" + str(peer_id))
+	var group_name = _get_cursor_3d_group_name(peer_id)
+	var nodes = tree.get_nodes_in_group(group_name)
 	for node in nodes:
 		if is_instance_valid(node):
 			for child in node.get_children():
