@@ -45,19 +45,37 @@ class DummyEditorInterface:
 		var n = Node.new()
 		n.name = "DummyMainScreen"
 		return n
-	func open_scene_from_path(path): pass
-	func close_scene(): pass
-	func reload_scene_from_path(path): pass
-	func save_scene(): pass
-	func mark_scene_as_unsaved(): pass
+	func open_scene_from_path(_path):
+		# No-op in headless
+		pass
+	func close_scene():
+		# No-op in headless
+		pass
+	func reload_scene_from_path(_path):
+		# No-op in headless
+		pass
+	func save_scene():
+		# No-op in headless
+		pass
+	func mark_scene_as_unsaved():
+		# No-op in headless
+		pass
 
 class DummyEditorUndoRedoManager:
 	signal version_changed
 	signal history_changed
-	func create_action(name, merge_mode=0, custom_context=null, undo_custom_context=false): pass
-	func add_do_property(object, property, value): pass
-	func add_undo_property(object, property, value): pass
-	func commit_action(execute=true): pass
+	func create_action(_name, _merge_mode=0, _custom_context=null, _undo_custom_context=false):
+		# No-op in headless
+		pass
+	func add_do_property(_object, _property, _value):
+		# No-op in headless
+		pass
+	func add_undo_property(_object, _property, _value):
+		# No-op in headless
+		pass
+	func commit_action(_execute=true):
+		# No-op in headless
+		pass
 
 class DummyEditorPlugin extends Node:
 	var ei = DummyEditorInterface.new()
