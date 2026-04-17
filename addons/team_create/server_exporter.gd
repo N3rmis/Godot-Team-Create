@@ -7,6 +7,8 @@ class DummyEditorSettings:
 	func has_setting(name): return false
 	func get_setting(name): return ""
 	func set_setting(name, val): pass
+	func add_property_info(info): pass
+	func set_initial_value(name, value, update_current): pass
 	func get_project_metadata(section, key, default): return default
 	func set_project_metadata(section, key, val): pass
 
