@@ -16,10 +16,10 @@ class DummyEditorFileSystem:
 	signal filesystem_changed
 	signal sources_changed
 	func is_scanning(): return false
-	func scan(): pass
+	func scan(): pass # No-op in headless
 	func get_filesystem(): return self
-	func scan_sources(): pass
-	func update_file(path): pass
+	func scan_sources(): pass # No-op in headless
+	func update_file(_path): pass # No-op in headless
 
 class DummyEditorSelection:
 	signal selection_changed
@@ -47,29 +47,29 @@ class DummyEditorInterface:
 		var n = Node.new()
 		n.name = "DummyMainScreen"
 		return n
-	func open_scene_from_path(path): pass
-	func close_scene(): pass
-	func reload_scene_from_path(path): pass
-	func save_scene(): pass
-	func mark_scene_as_unsaved(): pass
+	func open_scene_from_path(_path): pass # No-op in headless
+	func close_scene(): pass # No-op in headless
+	func reload_scene_from_path(_path): pass # No-op in headless
+	func save_scene(): pass # No-op in headless
+	func mark_scene_as_unsaved(): pass # No-op in headless
 
 class DummyEditorUndoRedoManager:
 	signal version_changed
 	signal history_changed
-	func create_action(name, merge_mode=0, custom_context=null, undo_custom_context=false): pass
-	func add_do_property(object, property, value): pass
-	func add_undo_property(object, property, value): pass
-	func commit_action(execute=true): pass
+	func create_action(_name, _merge_mode=0, _custom_context=null, _undo_custom_context=false): pass # No-op in headless
+	func add_do_property(_object, _property, _value): pass # No-op in headless
+	func add_undo_property(_object, _property, _value): pass # No-op in headless
+	func commit_action(_execute=true): pass # No-op in headless
 
 class DummyEditorPlugin extends Node:
 	var ei = DummyEditorInterface.new()
 	var dummy_undo_redo = DummyEditorUndoRedoManager.new()
 	func get_editor_interface(): return ei
 	func get_undo_redo(): return dummy_undo_redo
-	func add_control_to_dock(slot, control): pass
-	func remove_control_from_docks(control): pass
-	func download_update(): pass
-	func check_for_updates(): pass
+	func add_control_to_dock(_slot, _control): pass # No-op in headless
+	func remove_control_from_docks(_control): pass # No-op in headless
+	func download_update(): pass # No-op in headless
+	func check_for_updates(): pass # No-op in headless
 
 
 func _ready():
