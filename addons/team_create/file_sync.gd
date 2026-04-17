@@ -6,6 +6,38 @@ const SUPPORTED_EXTENSIONS = {"gd": true, "cs": true, "tscn": true, "scn": true,
 var network: Node
 var _is_syncing_files = false
 var _scan_timer = null
+
+func _is_safe_path(p: String) -> bool:
+	var decoded = p.replace("%2e", ".").replace("%2E", ".")
+	decoded = decoded.replace("%2f", "/").replace("%2F", "/")
+	decoded = decoded.replace("%5c", "\\").replace("%5C", "\\")
+	decoded = decoded.uri_decode()
+	decoded = decoded.replace("\\", "/")
+
+	if not decoded.begins_with("res://"):
+		return false
+
+	var base_res = ProjectSettings.globalize_path("res://").simplify_path()
+	if not base_res.ends_with("/"):
+		base_res += "/"
+
+	var target = ProjectSettings.globalize_path(decoded).simplify_path()
+
+	if not target.begins_with(base_res):
+		return false
+
+	var rel_path = "res://" + target.trim_prefix(base_res)
+
+	var blocked_dirs = ["addons/team_create", ".godot", "webrtc"]
+	for d in blocked_dirs:
+		if rel_path == "res://" + d or rel_path.begins_with("res://" + d + "/"):
+			return false
+
+	if rel_path == "res://project.godot":
+		return false
+
+	return true
+
 var _pending_files_to_receive = 0
 var downloading_files: Array = []
 var _sync_blocker: ColorRect
@@ -217,18 +249,9 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 @rpc("any_peer", "reliable")
 func request_file(path: String):
 	var sender_id = multiplayer.get_remote_sender_id()
-	# Validate path to prevent directory traversal / arbitrary file read
-	if path.begins_with("res://addons/team_create") or path.begins_with("res://.godot") or path.begins_with("res://webrtc"):
-		printerr("Team Create: Unauthorized file access: ", path)
-		rpc_id(sender_id, "receive_file", path, PackedByteArray(), true)
-		return
-	if not path.begins_with("res://") or ".." in path:
-		printerr("Invalid file path requested: ", path)
-		rpc_id(sender_id, "receive_file", path, PackedByteArray(), true)
-		return
 
-	# Block requests for project.godot completely
-	if path == "res://project.godot":
+	if not _is_safe_path(path):
+		printerr("Team Create: Unauthorized or invalid file access requested: ", path)
 		rpc_id(sender_id, "receive_file", path, PackedByteArray(), true)
 		return
 
@@ -260,12 +283,8 @@ func request_file(path: String):
 
 @rpc("any_peer", "reliable")
 func receive_file(path: String, bytes: PackedByteArray, is_final: bool = true):
-	# Validate path to prevent directory traversal
-	if path.begins_with("res://addons/team_create") or path.begins_with("res://.godot") or path.begins_with("res://webrtc"):
-		printerr("Team Create: Unauthorized file access: ", path)
-		return
-	if not path.begins_with("res://") or ".." in path:
-		printerr("Invalid file path received: ", path)
+	if not _is_safe_path(path):
+		printerr("Team Create: Unauthorized or invalid file path received: ", path)
 		return
 
 	var sender_id = multiplayer.get_remote_sender_id()
@@ -379,9 +398,7 @@ func remote_delete_file(path: String):
 	if multiplayer.get_remote_sender_id() != 1:
 		return # Only server can dictate deletions for security
 
-	if path.begins_with("res://addons/team_create") or path.begins_with("res://.godot") or path.begins_with("res://webrtc"):
-		return
-	if not path.begins_with("res://") or ".." in path:
+	if not _is_safe_path(path):
 		return
 
 	if FileAccess.file_exists(path):
