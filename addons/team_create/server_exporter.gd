@@ -4,11 +4,13 @@ extends Node
 const SERVER_SCRIPT_TEMPLATE = """extends Node
 
 class DummyEditorSettings:
-	func has_setting(_name): return false
-	func get_setting(_name): return ""
-	func set_setting(_name, _val): pass # No-op in headless
-	func get_project_metadata(_section, _key, default): return default
-	func set_project_metadata(_section, _key, _val): pass # No-op in headless
+	func has_setting(name): return false
+	func get_setting(name): return ""
+	func set_setting(name, val): pass
+	func add_property_info(info): pass
+	func set_initial_value(name, value, update_current): pass
+	func get_project_metadata(section, key, default): return default
+	func set_project_metadata(section, key, val): pass
 
 class DummyEditorFileSystem:
 	signal filesystem_changed
