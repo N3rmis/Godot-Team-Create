@@ -164,17 +164,31 @@ func _process_console_command(input: String):
 func _deferred_update_and_restart():
 	if plugin and plugin.has_method("download_update"):
 		plugin.download_update()
-		# Actual restart is handled in plugin.gd when extraction completes
+		# Actual restart is handled when extraction completes
 
 func _deferred_restart():
-	# Simple restart logic for the standalone server
-	# In Godot we can restart the process using OS.create_process
+	# Clean up network connections before restarting
+	disconnect_peer()
+
 	var exec_path = OS.get_executable_path()
 	var args = OS.get_cmdline_args()
-	OS.create_process(exec_path, args)
-	get_tree().quit(0)
+
+	# Try OS.create_instance first (Godot 4.3+)
+	if OS.has_method("create_instance"):
+		OS.create_instance(args)
+	elif OS.has_method("create_process"):
+		OS.create_process(exec_path, args)
+	else:
+		print("Restart not supported on this platform/version. Stopping instead.")
+
+	_deferred_stop()
 
 func _deferred_stop():
+	disconnect_peer()
+
+	if _console_thread and _console_thread.is_started():
+		_console_should_exit = true
+
 	get_tree().quit(0)
 
 func kick_peer(id: int):
