@@ -249,7 +249,7 @@ func request_file(path: String):
 
 	if not _is_safe_path(path):
 		printerr("Team Create: Unauthorized or invalid file access requested: ", path)
-		rpc_id(sender_id, "receive_file", path, PackedByteArray(), true)
+		rpc_id(sender_id, "receive_file", path, randi(), PackedByteArray(), true)
 		return
 
 	# Send file back
@@ -258,34 +258,35 @@ func request_file(path: String):
 		var total_size = bytes.size()
 
 		if total_size == 0:
-			rpc_id(sender_id, "receive_file", path, bytes, true)
+			rpc_id(sender_id, "receive_file", path, randi(), bytes, true)
 			return
 
 		# TODO: Abstract chunking logic into a reusable helper for large RPC data transfers
 		if network and network.is_webrtc:
 			var chunk_size = 60000
 			var offset = 0
+			var transfer_id = randi()
 			while offset < total_size:
 				var end_idx = min(offset + chunk_size, total_size)
 				var chunk = bytes.slice(offset, end_idx)
 				var is_final = (end_idx == total_size)
-				rpc_id(sender_id, "receive_file", path, chunk, is_final)
+				rpc_id(sender_id, "receive_file", path, transfer_id, chunk, is_final)
 				offset += chunk_size
 				if not is_final:
 					await get_tree().process_frame
 		else:
-			rpc_id(sender_id, "receive_file", path, bytes, true)
+			rpc_id(sender_id, "receive_file", path, randi(), bytes, true)
 	else:
-		rpc_id(sender_id, "receive_file", path, PackedByteArray(), true)
+		rpc_id(sender_id, "receive_file", path, randi(), PackedByteArray(), true)
 
 @rpc("any_peer", "reliable")
-func receive_file(path: String, bytes: PackedByteArray, is_final: bool = true):
+func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_final: bool = true):
 	if not _is_safe_path(path):
 		printerr("Team Create: Unauthorized or invalid file path received: ", path)
 		return
 
 	var sender_id = multiplayer.get_remote_sender_id()
-	var file_key = str(sender_id) + "_" + path
+	var file_key = str(sender_id) + "_" + str(transfer_id) + "_" + path
 	if not _receiving_files.has(file_key):
 		_receiving_files[file_key] = PackedByteArray()
 
