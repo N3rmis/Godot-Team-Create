@@ -352,22 +352,23 @@ func push_current_scene():
 					var total_size = bytes.size()
 
 					if total_size == 0:
-						rpc("receive_scene", path, bytes, true)
+						rpc("receive_scene", path, randi(), bytes, true)
 						return
 
 					if network and network.is_webrtc:
 						var chunk_size = 60000
 						var offset = 0
+						var transfer_id = randi()
 						while offset < total_size:
 							var end_idx = min(offset + chunk_size, total_size)
 							var chunk = bytes.slice(offset, end_idx)
 							var is_final = (end_idx == total_size)
-							rpc("receive_scene", path, chunk, is_final)
+							rpc("receive_scene", path, transfer_id, chunk, is_final)
 							offset += chunk_size
 							if not is_final:
 								await get_tree().process_frame
 					else:
-						rpc("receive_scene", path, bytes, true)
+						rpc("receive_scene", path, randi(), bytes, true)
 
 func push_specific_scene_to_peer(scene_path: String, id: int):
 	if multiplayer.is_server():
@@ -420,22 +421,23 @@ func _send_scene_bytes_to_peer(path: String, bytes: PackedByteArray, id: int):
 	var total_size = bytes.size()
 
 	if total_size == 0:
-		rpc_id(id, "receive_scene", path, bytes, true)
+		rpc_id(id, "receive_scene", path, randi(), bytes, true)
 		return
 
 	if network and network.is_webrtc:
 		var chunk_size = 60000
 		var offset = 0
+		var transfer_id = randi()
 		while offset < total_size:
 			var end_idx = min(offset + chunk_size, total_size)
 			var chunk = bytes.slice(offset, end_idx)
 			var is_final = (end_idx == total_size)
-			rpc_id(id, "receive_scene", path, chunk, is_final)
+			rpc_id(id, "receive_scene", path, transfer_id, chunk, is_final)
 			offset += chunk_size
 			if not is_final:
 				await get_tree().process_frame
 	else:
-		rpc_id(id, "receive_scene", path, bytes, true)
+		rpc_id(id, "receive_scene", path, randi(), bytes, true)
 
 func push_current_scene_to_peer(id: int):
 	if multiplayer.is_server():
@@ -705,24 +707,25 @@ func _send_update_node_property(id: String, prop_name: String, value: Variant, s
 		var chunk_size = 60000
 		var total_size = bytes.size()
 		var offset = 0
+		var transfer_id = randi()
 
 		if total_size == 0:
-			rpc("update_node_property_chunked", id, prop_name, bytes, scene_path, true)
+			rpc("update_node_property_chunked", id, prop_name, transfer_id, bytes, scene_path, true)
 			return
 
 		while offset < total_size:
 			var end_idx = min(offset + chunk_size, total_size)
 			var chunk = bytes.slice(offset, end_idx)
 			var is_final = (end_idx == total_size)
-			rpc("update_node_property_chunked", id, prop_name, chunk, scene_path, is_final)
+			rpc("update_node_property_chunked", id, prop_name, transfer_id, chunk, scene_path, is_final)
 			offset += chunk_size
 	else:
 		rpc("update_node_property", id, prop_name, value, scene_path)
 
 @rpc("any_peer", "reliable")
-func update_node_property_chunked(id: String, prop_name: String, chunk: PackedByteArray, scene_path: String = "", is_final: bool = true):
+func update_node_property_chunked(id: String, prop_name: String, transfer_id: int, chunk: PackedByteArray, scene_path: String = "", is_final: bool = true):
 	var sender_id = multiplayer.get_remote_sender_id()
-	var prop_key = str(sender_id) + "_" + id + "_" + prop_name
+	var prop_key = str(sender_id) + "_" + id + "_" + prop_name + "_" + str(transfer_id)
 
 	if not _receiving_properties.has(prop_key):
 		_receiving_properties[prop_key] = PackedByteArray()
@@ -795,7 +798,7 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 			_last_tracked_properties[id][prop_name] = value
 
 @rpc("any_peer", "reliable")
-func receive_scene(path: String, bytes: PackedByteArray, is_final: bool = true):
+func receive_scene(path: String, transfer_id: int, bytes: PackedByteArray, is_final: bool = true):
 	# Validate path to prevent directory traversal
 	if path.begins_with("res://addons/team_create") or path.begins_with("res://.godot") or path.begins_with("res://webrtc"):
 		printerr("Team Create: Unauthorized scene access: ", path)
@@ -805,7 +808,7 @@ func receive_scene(path: String, bytes: PackedByteArray, is_final: bool = true):
 		return
 
 	var sender_id = multiplayer.get_remote_sender_id()
-	var scene_key = str(sender_id) + "_" + path
+	var scene_key = str(sender_id) + "_" + str(transfer_id) + "_" + path
 	if not _receiving_scenes.has(scene_key):
 		_receiving_scenes[scene_key] = PackedByteArray()
 
@@ -924,27 +927,28 @@ func request_scene_state(scene_path: String):
 					var total_size = bytes.size()
 
 					if total_size == 0:
-						rpc_id(sender_id, "receive_scene_state", scene_path, bytes, true)
+						rpc_id(sender_id, "receive_scene_state", scene_path, randi(), bytes, true)
 						DirAccess.remove_absolute(temp_path)
 						return
 
 					if network and network.is_webrtc:
 						var chunk_size = 60000
 						var offset = 0
+						var transfer_id = randi()
 						while offset < total_size:
 							var end_idx = min(offset + chunk_size, total_size)
 							var chunk = bytes.slice(offset, end_idx)
 							var is_final = (end_idx == total_size)
-							rpc_id(sender_id, "receive_scene_state", scene_path, chunk, is_final)
+							rpc_id(sender_id, "receive_scene_state", scene_path, transfer_id, chunk, is_final)
 							offset += chunk_size
 							if not is_final:
 								await get_tree().process_frame
 					else:
-						rpc_id(sender_id, "receive_scene_state", scene_path, bytes, true)
+						rpc_id(sender_id, "receive_scene_state", scene_path, randi(), bytes, true)
 				DirAccess.remove_absolute(temp_path)
 
 @rpc("any_peer", "reliable")
-func receive_scene_state(path: String, bytes: PackedByteArray, is_final: bool = true):
+func receive_scene_state(path: String, transfer_id: int, bytes: PackedByteArray, is_final: bool = true):
 	if path.begins_with("res://addons/team_create") or path.begins_with("res://.godot") or path.begins_with("res://webrtc"):
 		printerr("Team Create: Unauthorized scene state access: ", path)
 		return
@@ -953,7 +957,7 @@ func receive_scene_state(path: String, bytes: PackedByteArray, is_final: bool = 
 		return
 
 	var sender_id = multiplayer.get_remote_sender_id()
-	var state_key = str(sender_id) + "_" + path
+	var state_key = str(sender_id) + "_" + str(transfer_id) + "_" + path
 	if not _receiving_scene_states.has(state_key):
 		_receiving_scene_states[state_key] = PackedByteArray()
 
