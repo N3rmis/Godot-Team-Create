@@ -26,8 +26,16 @@ var webrtc_candidates = []
 var local_sdp_type = ""
 var local_sdp = ""
 var _local_username = ""
+# Console thread
+var _console_thread: Thread
+var _console_should_exit: bool = false
+
 
 func _ready():
+	if is_standalone_server:
+		_console_thread = Thread.new()
+		_console_thread.start(Callable(self, "_server_console_thread_func"))
+
 	call_deferred("_init_editor_settings")
 	name = "TeamCreateNetwork"
 	# Load sync modules
@@ -50,6 +58,110 @@ func _ready():
 	multiplayer.connected_to_server.connect(_on_connected_to_server)
 	multiplayer.connection_failed.connect(_on_connection_failed)
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
+
+
+func _exit_tree():
+	if _console_thread and _console_thread.is_started():
+		_console_should_exit = true
+		# We do not wait_to_finish() here because read_string_from_stdin() blocks infinitely
+		# and attempting to wait will cause the server to hang on shutdown.
+		# Godot will forcefully clean up the thread when the process exits.
+
+
+func _server_console_thread_func():
+	while not _console_should_exit:
+		# OS.read_string_from_stdin is blocking. It will wake up when the user hits Enter.
+		var input = OS.read_string_from_stdin().strip_edges()
+		if input == "":
+			continue
+
+		var args = input.split(" ")
+		var cmd = args[0].to_lower()
+
+		if cmd == "/kick":
+			if args.size() < 2:
+				print("Usage: /kick <username>")
+			else:
+				var target_username = args[1]
+				var target_id = -1
+				for id in peers.keys():
+					if peers[id]["username"] == target_username:
+						target_id = id
+						break
+				if target_id != -1:
+					if target_id == 1:
+						print("Cannot kick the server.")
+					else:
+						print("Kicking user: " + target_username)
+						call_deferred("kick_peer", target_id)
+				else:
+					print("User not found: " + target_username)
+
+		elif cmd == "/update":
+			print("Updating plugin and restarting server...")
+			if plugin and plugin.has_method("download_update"):
+				call_deferred("_deferred_update_and_restart")
+			else:
+				print("Update mechanism not available.")
+
+		elif cmd == "/list":
+			print("Connected users:")
+			if is_webrtc:
+				print(" (IPs not available for WebRTC)")
+			for id in peers.keys():
+				var info = peers[id]
+				var ip_str = "N/A"
+				if not is_webrtc and multiplayer.multiplayer_peer is ENetMultiplayerPeer and id != 1:
+					ip_str = multiplayer.multiplayer_peer.get_peer_address(id)
+				if id == 1:
+					ip_str = "localhost"
+				print("- " + info["username"] + " (ID: " + str(id) + ", IP: " + ip_str + ")")
+
+		elif cmd == "/restart":
+			print("Restarting server...")
+			call_deferred("_deferred_restart")
+
+		elif cmd == "/stop":
+			print("Stopping server...")
+			# Depending on save logic, we might need to save.
+			# For now just stop.
+			call_deferred("_deferred_stop")
+
+		elif cmd == "/info":
+			print("--- Server Info ---")
+			print("Memory Usage: " + String.humanize_size(OS.get_static_memory_usage()))
+			print("Peak Memory Usage: " + String.humanize_size(OS.get_static_memory_peak_usage()))
+			print("CPU Usage: " + str(Engine.get_frames_per_second()) + " FPS")
+			var port = PORT if not is_webrtc else "WebRTC"
+			print("Network: Port " + str(port))
+			print("Total users connected: " + str(peers.size()))
+			print("-------------------")
+		else:
+			print("Unknown command: " + cmd)
+
+func _deferred_update_and_restart():
+	if plugin and plugin.has_method("download_update"):
+		plugin.download_update()
+		# Actual restart is handled in plugin.gd when extraction completes
+
+func _deferred_restart():
+	# Simple restart logic for the standalone server
+	# In Godot we can restart the process using OS.create_process
+	var exec_path = OS.get_executable_path()
+	var args = OS.get_cmdline_args()
+	OS.create_process(exec_path, args)
+	get_tree().quit(0)
+
+func _deferred_stop():
+	get_tree().quit(0)
+
+func kick_peer(id: int):
+	if is_server and id != 1:
+		if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+			multiplayer.multiplayer_peer.disconnect_peer(id)
+		elif webrtc_peer:
+			webrtc_peer.remove_peer(id)
+		print("Kicked peer ", id)
 
 func update_local_username(new_name: String):
 	_local_username = new_name
