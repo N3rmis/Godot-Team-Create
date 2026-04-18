@@ -69,87 +69,97 @@ func _exit_tree():
 
 
 func _server_console_thread_func():
-	print("Server console ready. Type /help for a list of commands.")
+	print_rich("[color=green]Server console ready. Type /help for a list of commands.[/color]")
 	while not _console_should_exit:
 		# OS.read_string_from_stdin is blocking. It will wake up when the user hits Enter.
 		var input = OS.read_string_from_stdin().strip_edges()
 		if input == "":
 			OS.delay_msec(50)
 			continue
+		call_deferred("_process_console_command", input)
 
-		var args = input.split(" ")
-		var cmd = args[0].to_lower()
+func _process_console_command(input: String):
+	var args = input.split(" ")
+	var cmd = args[0].to_lower()
 
-		if cmd == "/help":
-			print("--- Available Commands ---")
-			print("/kick <user>   - Kicks a user from the server")
-			print("/list          - Lists all connected users")
-			print("/info          - Shows server statistics (memory, CPU, players, etc.)")
-			print("/update        - Downloads latest update and restarts the server")
-			print("/restart       - Restarts the server")
-			print("/stop          - Stops and exits the server")
-			print("--------------------------")
+	if cmd == "/help":
+		print_rich("[color=cyan]--- Available Commands ---[/color]")
+		print_rich("[color=white]/kick <user>[/color]   - Kicks a user from the server")
+		print_rich("[color=white]/list[/color]          - Lists all connected users")
+		print_rich("[color=white]/info[/color]          - Shows server statistics (memory, CPU, players, etc.)")
+		print_rich("[color=white]/update[/color]        - Downloads latest update and restarts the server")
+		print_rich("[color=white]/restart[/color]       - Restarts the server")
+		print_rich("[color=white]/stop[/color]          - Stops and exits the server")
+		print_rich("[color=cyan]--------------------------[/color]")
 
-		elif cmd == "/kick":
-			if args.size() < 2:
-				print("Usage: /kick <username>")
-			else:
-				var target_username = args[1]
-				var target_id = -1
-				for id in peers.keys():
-					if peers[id]["username"] == target_username:
-						target_id = id
-						break
-				if target_id != -1:
-					if target_id == 1:
-						print("Cannot kick the server.")
-					else:
-						print("Kicking user: " + target_username)
-						call_deferred("kick_peer", target_id)
-				else:
-					print("User not found: " + target_username)
-
-		elif cmd == "/update":
-			print("Updating plugin and restarting server...")
-			if plugin and plugin.has_method("download_update"):
-				call_deferred("_deferred_update_and_restart")
-			else:
-				print("Update mechanism not available.")
-
-		elif cmd == "/list":
-			print("Connected users:")
-			if is_webrtc:
-				print(" (IPs not available for WebRTC)")
-			for id in peers.keys():
-				var info = peers[id]
-				var ip_str = "N/A"
-				if not is_webrtc and multiplayer.multiplayer_peer is ENetMultiplayerPeer and id != 1:
-					ip_str = multiplayer.multiplayer_peer.get_peer_address(id)
-				if id == 1:
-					ip_str = "localhost"
-				print("- " + info["username"] + " (ID: " + str(id) + ", IP: " + ip_str + ")")
-
-		elif cmd == "/restart":
-			print("Restarting server...")
-			call_deferred("_deferred_restart")
-
-		elif cmd == "/stop":
-			print("Stopping server...")
-			# Depending on save logic, we might need to save.
-			# For now just stop.
-			call_deferred("_deferred_stop")
-
-		elif cmd == "/info":
-			print("--- Server Info ---")
-			print("Memory Usage: " + String.humanize_size(OS.get_static_memory_usage()))
-			print("Peak Memory Usage: " + String.humanize_size(OS.get_static_memory_peak_usage()))
-			print("CPU Usage: " + str(Engine.get_frames_per_second()) + " FPS")
-			var port = PORT if not is_webrtc else "WebRTC"
-			print("Network: Port " + str(port))
-			print("Total users connected: " + str(peers.size()))
-			print("-------------------")
+	elif cmd == "/kick":
+		if args.size() < 2:
+			print_rich("[color=orange]Usage: /kick <username>[/color]")
 		else:
-			print("Unknown command: " + cmd)
+			var target_username = args[1]
+			var target_id = -1
+			for id in peers.keys():
+				if peers[id]["username"] == target_username:
+					target_id = id
+					break
+			if target_id != -1:
+				if target_id == 1:
+					print_rich("[color=red]Cannot kick the server.[/color]")
+				else:
+					print_rich("[color=yellow]Kicking user: " + target_username + "[/color]")
+					call_deferred("kick_peer", target_id)
+			else:
+				print_rich("[color=red]User not found: " + target_username + "[/color]")
+
+	elif cmd == "/update":
+		print_rich("[color=cyan]Updating plugin and restarting server...[/color]")
+		if plugin and plugin.has_method("download_update"):
+			call_deferred("_deferred_update_and_restart")
+		else:
+			print_rich("[color=red]Update mechanism not available.[/color]")
+
+	elif cmd == "/list":
+		print_rich("[color=cyan]Connected users:[/color]")
+		if is_webrtc:
+			print_rich("[color=gray] (IPs not available for WebRTC)[/color]")
+		var count = 0
+		for id in peers.keys():
+			if id == 1:
+				continue # Skip the server
+			var info = peers[id]
+			var ip_str = "N/A"
+			if not is_webrtc and multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+				ip_str = multiplayer.multiplayer_peer.get_peer_address(id)
+			print_rich("[color=white]- " + info["username"] + " (ID: " + str(id) + ", IP: " + ip_str + ")[/color]")
+			count += 1
+		print_rich("[color=green]Total users: " + str(count) + "[/color]")
+
+	elif cmd == "/restart":
+		print_rich("[color=orange]Restarting server...[/color]")
+		call_deferred("_deferred_restart")
+
+	elif cmd == "/stop":
+		print_rich("[color=red]Stopping server...[/color]")
+		call_deferred("_deferred_stop")
+
+	elif cmd == "/info":
+		print_rich("[color=cyan]--- Server Info ---[/color]")
+		print_rich("[color=white]Memory Usage:[/color] " + String.humanize_size(OS.get_static_memory_usage()))
+		print_rich("[color=white]Peak Memory Usage:[/color] " + String.humanize_size(OS.get_static_memory_peak_usage()))
+		var cpu_usage = Performance.get_monitor(Performance.TIME_PROCESS) * Engine.get_frames_per_second() * 100.0
+		print_rich("[color=white]CPU Usage:[/color] " + ("%.2f" % cpu_usage) + "%")
+		var port = str(PORT) if not is_webrtc else "WebRTC"
+		var local_ip = "127.0.0.1"
+		for address in IP.get_local_addresses():
+			if address.split(".").size() == 4 and not address.begins_with("127.") and not address.begins_with("169.254."):
+				local_ip = address
+				break
+		print_rich("[color=white]Network:[/color] " + local_ip + ":" + str(port) if not is_webrtc else "[color=white]Network:[/color] WebRTC")
+		var user_count = peers.size() - 1 if peers.has(1) else peers.size()
+		print_rich("[color=white]Total users connected:[/color] " + str(user_count))
+		print_rich("[color=cyan]-------------------[/color]")
+	else:
+		print_rich("[color=red]Unknown command: " + cmd + "[/color]")
 
 func _deferred_update_and_restart():
 	if plugin and plugin.has_method("download_update"):
