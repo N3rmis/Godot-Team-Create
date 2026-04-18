@@ -122,7 +122,7 @@ class DummyEditorPlugin extends Node:
 				continue # Directory
 
 			# Normalize path separators
-			var f_norm = f.replace("\\", "/")
+			var f_norm = f.replace("\\\\", "/")
 
 			# Ensure it's inside the addons/team_create folder
 			var parts = f_norm.split("/")
