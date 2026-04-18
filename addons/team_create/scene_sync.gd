@@ -79,6 +79,7 @@ const SYNC_INTERVAL = 0.1 # Sync 10 times a second max
 
 # Tracking structure changes locally so we don't bounce events back and forth
 var _ignore_next_structure_event = false
+var _is_adding_outline = false
 var _is_reloading_scene = false
 var _pre_removal_paths = {}
 var _node_names = {}
@@ -302,8 +303,10 @@ func update_peer_selection(peer_id: int, selected_ids: Array, scene_path: String
 
 				outline.mesh = box_mesh
 				outline.material_override = mat
+				_is_adding_outline = true
 				if is_instance_valid(node) and node.is_inside_tree():
 					node.add_child(outline)
+				_is_adding_outline = false
 
 			elif node is Node2D or node is Control:
 				var outline = ColorRect.new()
@@ -323,8 +326,10 @@ func update_peer_selection(peer_id: int, selected_ids: Array, scene_path: String
 
 				# Ensure it doesn't block mouse
 				outline.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				_is_adding_outline = true
 				if is_instance_valid(node) and node.is_inside_tree():
 					node.add_child(outline)
+				_is_adding_outline = false
 
 func clear_peer_selections(peer_id: int):
 	var outline_group_name = _get_selection_group_name(peer_id)
@@ -470,6 +475,11 @@ func _on_node_added(node: Node):
 
 	# Ensure the node still exists and has a parent after the frame delay
 	if not is_instance_valid(node) or not node.get_parent():
+		return
+
+	# Catch unintentionally duplicated outline nodes from Godot's native duplication
+	if "TeamCreateSelectionOutline_" in node.name and not _is_adding_outline:
+		node.queue_free()
 		return
 
 	# Prevent syncing internal nodes like editor UI or auto-generated items
