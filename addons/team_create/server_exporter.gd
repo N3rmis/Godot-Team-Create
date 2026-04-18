@@ -111,8 +111,8 @@ const LINUX_SH_TEMPLATE = """#!/bin/bash
 
 GODOT_EXEC="godot"
 
-for f in ./Godot_v4*linux*.x86_64 ./Godot_v4*.x86_64; do
-    if [ -f "$f" ]; then
+for f in ./*linux*.x86_64 ./*linux*.x86_32 ./Godot_v4*.x86_64 ./godot*; do
+    if [ -f "$f" ] && [ -x "$f" ]; then
         GODOT_EXEC="$f"
         break
     fi
@@ -129,7 +129,7 @@ const WINDOWS_BAT_TEMPLATE = """@echo off
 set "GODOT_EXEC=godot.console.exe"
 
 :: First try to find the Godot console wrapper, required for stdin input on Windows
-for %%f in (Godot_v4*console.exe) do (
+for %%f in (*console*.exe) do (
     if exist "%%f" (
         set "GODOT_EXEC=%%f"
         goto found
@@ -137,14 +137,27 @@ for %%f in (Godot_v4*console.exe) do (
 )
 
 :: Fallback to standard executable
-for %%f in (Godot_v4*.exe) do (
+for %%f in (*godot*.exe) do (
     if exist "%%f" (
         set "GODOT_EXEC=%%f"
-        goto found
+        goto found_standard
     )
 )
-:found
+for %%f in (Godot*.exe) do (
+    if exist "%%f" (
+        set "GODOT_EXEC=%%f"
+        goto found_standard
+    )
+)
+goto found
 
+:found_standard
+echo WARNING: Standard Godot executable found instead of the console wrapper!
+echo You will not be able to type commands into the server console.
+echo Please place the Godot console executable (e.g. godot.console.exe) in this folder.
+echo.
+
+:found
 echo Starting Team Create Server...
 "%GODOT_EXEC%" --path project --headless
 pause

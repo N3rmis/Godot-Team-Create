@@ -74,6 +74,7 @@ func _server_console_thread_func():
 		# OS.read_string_from_stdin is blocking. It will wake up when the user hits Enter.
 		var input = OS.read_string_from_stdin().strip_edges()
 		if input == "":
+			OS.delay_msec(50)
 			continue
 
 		var args = input.split(" ")
