@@ -7,6 +7,18 @@ var network: Node
 var _is_syncing_files = false
 var _scan_timer = null
 
+
+func _get_cached_md5(path: String) -> String:
+	var mod_time = FileAccess.get_modified_time(path)
+	if _file_hash_cache.has(path):
+		var cached = _file_hash_cache[path]
+		if cached["time"] == mod_time:
+			return cached["md5"]
+
+	var md5 = FileAccess.get_md5(path)
+	_file_hash_cache[path] = {"time": mod_time, "md5": md5}
+	return md5
+
 func _is_safe_path(p: String) -> bool:
 	var decoded = p.replace("%2e", ".").replace("%2E", ".")
 	decoded = decoded.replace("%2f", "/").replace("%2F", "/")
@@ -43,6 +55,7 @@ var downloading_files: Array = []
 var _sync_blocker: ColorRect
 var _receiving_files: Dictionary = {}
 var _known_files: Array = []
+var _file_hash_cache: Dictionary = {}
 signal sync_completed
 
 
@@ -89,6 +102,14 @@ func _on_filesystem_changed():
 	if _is_syncing_files or not multiplayer.has_multiplayer_peer() or multiplayer.get_peers().is_empty():
 		return
 
+	# Clear cache entries for files that were removed
+	var keys_to_remove = []
+	for path in _file_hash_cache.keys():
+		if not FileAccess.file_exists(path):
+			keys_to_remove.append(path)
+	for path in keys_to_remove:
+		_file_hash_cache.erase(path)
+
 	# Automatically sync files whenever Godot detects a local file system change.
 	sync_all_files()
 
@@ -118,7 +139,7 @@ func sync_all_files():
 	for path in all_files:
 		if path.begins_with("res://addons/team_create"):
 			continue
-		file_hashes[path] = FileAccess.get_md5(path)
+		file_hashes[path] = _get_cached_md5(path)
 	rpc("compare_and_sync_files", file_hashes)
 	_is_syncing_files = false
 
@@ -129,7 +150,7 @@ func sync_all_files_to_peer(id: int):
 		for path in all_files:
 			if path.begins_with("res://addons/team_create"):
 				continue
-			file_hashes[path] = FileAccess.get_md5(path)
+			file_hashes[path] = _get_cached_md5(path)
 		rpc_id(id, "compare_and_sync_files", file_hashes)
 
 func get_all_files(dir_path: String, exclude_dirs: Array = ["res://.godot", "res://webrtc"]) -> Array:
@@ -197,13 +218,15 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 	for path in local_files:
 		if path.begins_with("res://addons/team_create"):
 			continue
-		local_hashes[path] = FileAccess.get_md5(path)
+		local_hashes[path] = _get_cached_md5(path)
 
 	# Find files to delete (only allow the server to delete files to prevent clients wiping the server)
 	if sender_id == 1:
 		for path in local_hashes:
 			if not peer_hashes.has(path):
 				DirAccess.remove_absolute(path)
+				if _file_hash_cache.has(path):
+					_file_hash_cache.erase(path)
 				print("Deleted unused file: ", path)
 
 	# Request differing files
@@ -401,6 +424,8 @@ func remote_delete_file(path: String):
 
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(path)
+		if _file_hash_cache.has(path):
+			_file_hash_cache.erase(path)
 		print("Team Create: Replicated file deletion: ", path)
 
 		# Remove from known files
