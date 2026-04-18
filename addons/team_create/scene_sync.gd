@@ -12,7 +12,9 @@ var _server_tracked_scenes = {}
 var _server_save_timer = 0.0
 
 func _get_target_scene(scene_path: String) -> Node:
-	var current_scene = _get_target_scene(scene_path)
+	var current_scene = null
+	if network and network.plugin:
+		current_scene = network.plugin.get_editor_interface().get_edited_scene_root()
 
 	if network.get("is_standalone_server"):
 		if scene_path == "":
