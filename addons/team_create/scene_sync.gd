@@ -9,10 +9,44 @@ var _last_selected_ids = []
 var _time_since_sync = 0.0
 
 var _server_tracked_scenes = {}
+var _server_dummy_scenes = {}
 var _server_save_timer = 0.0
 var _failed_scene_loads = {}
 const FAILED_LOAD_COOLDOWN = 2.0
 var _failed_load_timers = {}
+
+
+func _safe_load_headless(path: String) -> Dictionary:
+	var packed = load(path)
+	if packed and packed is PackedScene:
+		return {"packed": packed, "is_dummy": false}
+
+	if not network.get("is_standalone_server"):
+		return {"packed": null, "is_dummy": false}
+
+	var file = FileAccess.open(path, FileAccess.READ)
+	if not file: return {"packed": null, "is_dummy": false}
+	var text = file.get_as_text()
+	file.close()
+
+	var regex = RegEx.new()
+	regex.compile("ExtResource\\(\".*?\"\\)")
+	text = regex.sub(text, "null", true)
+
+	var regex2 = RegEx.new()
+	regex2.compile("\\[ext_resource.*?\\]")
+	text = regex2.sub(text, "", true)
+
+	var temp_path = path + ".server_temp.tscn"
+	var temp_file = FileAccess.open(temp_path, FileAccess.WRITE)
+	if temp_file:
+		temp_file.store_string(text)
+		temp_file.close()
+		var temp_packed = load(temp_path)
+		DirAccess.remove_absolute(temp_path)
+		return {"packed": temp_packed, "is_dummy": true}
+
+	return {"packed": null, "is_dummy": false}
 
 func _get_target_scene(scene_path: String) -> Node:
 	var current_scene = null
@@ -34,12 +68,17 @@ func _get_target_scene(scene_path: String) -> Node:
 			return null
 
 		if ResourceLoader.exists(scene_path):
-			var packed = load(scene_path)
+			var result = _safe_load_headless(scene_path)
+			var packed = result.packed
 			if packed and packed is PackedScene:
 				var instance = packed.instantiate()
 				if instance:
 					instance.set_meta("scene_file_path", scene_path)
 					_server_tracked_scenes[scene_path] = instance
+					if result.is_dummy:
+						_server_dummy_scenes[scene_path] = true
+					else:
+						_server_dummy_scenes.erase(scene_path)
 					get_tree().root.add_child(instance)
 					return instance
 
@@ -62,6 +101,8 @@ func _save_server_tracked_scenes():
 		cached_cursors = tree.get_nodes_in_group("TeamCreateCursors")
 
 	for path in _server_tracked_scenes:
+		if _server_dummy_scenes.has(path):
+			continue
 		var scene_node = _server_tracked_scenes[path]
 		if is_instance_valid(scene_node):
 			# Temporarily remove outlines
@@ -863,12 +904,17 @@ func receive_scene(path: String, transfer_id: int, bytes: PackedByteArray, is_fi
 				if is_instance_valid(s):
 					s.queue_free()
 				_server_tracked_scenes.erase(path)
-			var packed = load(path)
+			var result = _safe_load_headless(path)
+			var packed = result.packed
 			if packed and packed is PackedScene:
 				var instance = packed.instantiate()
 				if instance:
 					instance.set_meta("scene_file_path", path)
 					_server_tracked_scenes[path] = instance
+					if result.is_dummy:
+						_server_dummy_scenes[path] = true
+					else:
+						_server_dummy_scenes.erase(path)
 					get_tree().root.add_child(instance)
 			return
 		else:
@@ -1015,12 +1061,17 @@ func receive_scene_state(path: String, transfer_id: int, bytes: PackedByteArray,
 						s.queue_free()
 					_server_tracked_scenes.erase(path)
 
-				var packed = load(path)
+				var result = _safe_load_headless(path)
+				var packed = result.packed
 				if packed and packed is PackedScene:
 					var instance = packed.instantiate()
 					if instance:
 						instance.set_meta("scene_file_path", path)
 						_server_tracked_scenes[path] = instance
+						if result.is_dummy:
+							_server_dummy_scenes[path] = true
+						else:
+							_server_dummy_scenes.erase(path)
 						get_tree().root.add_child(instance)
 			else:
 				var editor = network.plugin.get_editor_interface()
