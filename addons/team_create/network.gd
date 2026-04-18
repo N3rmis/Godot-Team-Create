@@ -129,7 +129,7 @@ func _process_console_command(input: String):
 			var info = peers[id]
 			var ip_str = "N/A"
 			if not is_webrtc and multiplayer.multiplayer_peer is ENetMultiplayerPeer:
-				ip_str = multiplayer.multiplayer_peer.get_peer_address(id)
+				ip_str = multiplayer.multiplayer_peer.get_peer(id).get_remote_address()
 			print_rich("[color=white]- " + info["username"] + " (ID: " + str(id) + ", IP: " + ip_str + ")[/color]")
 			count += 1
 		print_rich("[color=green]Total users: " + str(count) + "[/color]")
