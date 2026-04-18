@@ -10,6 +10,9 @@ var _time_since_sync = 0.0
 
 var _server_tracked_scenes = {}
 var _server_save_timer = 0.0
+var _failed_scene_loads = {}
+const FAILED_LOAD_COOLDOWN = 2.0
+var _failed_load_timers = {}
 
 func _get_target_scene(scene_path: String) -> Node:
 	var current_scene = null
@@ -27,6 +30,9 @@ func _get_target_scene(scene_path: String) -> Node:
 			else:
 				_server_tracked_scenes.erase(scene_path)
 
+		if _failed_scene_loads.has(scene_path):
+			return null
+
 		if ResourceLoader.exists(scene_path):
 			var packed = load(scene_path)
 			if packed and packed is PackedScene:
@@ -36,6 +42,10 @@ func _get_target_scene(scene_path: String) -> Node:
 					_server_tracked_scenes[scene_path] = instance
 					get_tree().root.add_child(instance)
 					return instance
+
+			_failed_scene_loads[scene_path] = true
+			_failed_load_timers[scene_path] = FAILED_LOAD_COOLDOWN
+			printerr("Team Create: Failed to load scene or its dependencies (cooldown applied): ", scene_path)
 		return null
 	else:
 		return current_scene
@@ -146,6 +156,15 @@ func _on_node_tree_exiting(node: Node):
 		_pre_removal_paths[node.get_instance_id()] = {"id": network.assign_unique_id(node), "scene_path": scene_path, "root_node": root_node}
 
 func _process(delta):
+	var expired = []
+	for path in _failed_load_timers.keys():
+		_failed_load_timers[path] -= delta
+		if _failed_load_timers[path] <= 0:
+			expired.append(path)
+	for path in expired:
+		_failed_load_timers.erase(path)
+		_failed_scene_loads.erase(path)
+
 	if network and network.get("is_standalone_server"):
 		_server_save_timer += delta
 		if _server_save_timer >= 60.0:
