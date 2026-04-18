@@ -126,8 +126,17 @@ const WINDOWS_BAT_TEMPLATE = """@echo off
 :: Team Create Windows Headless Server
 :: This script launches the project in headless mode as a server.
 
-set "GODOT_EXEC=godot.exe"
+set "GODOT_EXEC=godot.console.exe"
 
+:: First try to find the Godot console wrapper, required for stdin input on Windows
+for %%f in (Godot_v4*console.exe) do (
+    if exist "%%f" (
+        set "GODOT_EXEC=%%f"
+        goto found
+    )
+)
+
+:: Fallback to standard executable
 for %%f in (Godot_v4*.exe) do (
     if exist "%%f" (
         set "GODOT_EXEC=%%f"

@@ -69,6 +69,7 @@ func _exit_tree():
 
 
 func _server_console_thread_func():
+	print("Server console ready. Type /help for a list of commands.")
 	while not _console_should_exit:
 		# OS.read_string_from_stdin is blocking. It will wake up when the user hits Enter.
 		var input = OS.read_string_from_stdin().strip_edges()
@@ -78,7 +79,17 @@ func _server_console_thread_func():
 		var args = input.split(" ")
 		var cmd = args[0].to_lower()
 
-		if cmd == "/kick":
+		if cmd == "/help":
+			print("--- Available Commands ---")
+			print("/kick <user>   - Kicks a user from the server")
+			print("/list          - Lists all connected users")
+			print("/info          - Shows server statistics (memory, CPU, players, etc.)")
+			print("/update        - Downloads latest update and restarts the server")
+			print("/restart       - Restarts the server")
+			print("/stop          - Stops and exits the server")
+			print("--------------------------")
+
+		elif cmd == "/kick":
 			if args.size() < 2:
 				print("Usage: /kick <username>")
 			else:
