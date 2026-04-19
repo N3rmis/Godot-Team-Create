@@ -29,13 +29,28 @@ func _safe_load_headless(path: String) -> Dictionary:
 	var text = file.get_as_text()
 	file.close()
 
-	var regex = RegEx.new()
-	regex.compile("ExtResource\\(\".*?\"\\)")
-	text = regex.sub(text, "null", true)
-
+	var is_modified = false
 	var regex2 = RegEx.new()
-	regex2.compile("\\[ext_resource.*?\\]")
-	text = regex2.sub(text, "", true)
+	regex2.compile("\\[ext_resource.*?type=\"(?<type>.*?)\".*?path=\"(?<path>res://.*?)\".*?\\]")
+	var matches = regex2.search_all(text)
+	for m in matches:
+		var full_match = m.get_string()
+		var type = m.get_string("type")
+		var orig_path = m.get_string("path")
+		if not ResourceLoader.exists(orig_path):
+			var dummy_path = network._get_or_create_dummy_resource(orig_path, type)
+
+			var new_block = '[ext_resource type="' + type + '" path="' + dummy_path + '"'
+			var id_regex = RegEx.new()
+			id_regex.compile("id=\"(.*?)\"")
+			var id_match = id_regex.search(full_match)
+			if id_match:
+				new_block += ' id="' + id_match.get_string(1) + '"]'
+			else:
+				new_block += "]"
+
+			text = text.replace(full_match, new_block)
+			is_modified = true
 
 	var temp_path = path + ".server_temp.tscn"
 	var temp_file = FileAccess.open(temp_path, FileAccess.WRITE)
@@ -101,8 +116,6 @@ func _save_server_tracked_scenes():
 		cached_cursors = tree.get_nodes_in_group("TeamCreateCursors")
 
 	for path in _server_tracked_scenes:
-		if _server_dummy_scenes.has(path):
-			continue
 		var scene_node = _server_tracked_scenes[path]
 		if is_instance_valid(scene_node):
 			# Temporarily remove outlines
@@ -119,8 +132,19 @@ func _save_server_tracked_scenes():
 
 			var packed = PackedScene.new()
 			if packed.pack(scene_node) == OK:
-				ResourceSaver.save(packed, path)
-				print("Server automatically saved tracked scene: ", path)
+				var temp_save_path = path + ".server_save.tscn"
+				if ResourceSaver.save(packed, temp_save_path) == OK:
+					network._restore_dummy_paths_in_file(temp_save_path)
+					var f = FileAccess.open(temp_save_path, FileAccess.READ)
+					if f:
+						var t_text = f.get_as_text()
+						f.close()
+						var final_f = FileAccess.open(path, FileAccess.WRITE)
+						if final_f:
+							final_f.store_string(t_text)
+							final_f.close()
+							print("Server automatically saved tracked scene: ", path)
+					DirAccess.remove_absolute(temp_save_path)
 
 			for data in outlines:
 				if is_instance_valid(data["parent"]) and is_instance_valid(data["node"]):
@@ -467,6 +491,7 @@ func push_specific_scene_to_peer(scene_path: String, id: int):
 				if packed.pack(scene_node) == OK:
 					var temp_path = "user://temp_scene_state_server_" + str(id) + ".tscn"
 					if ResourceSaver.save(packed, temp_path) == OK:
+						network._restore_dummy_paths_in_file(temp_path)
 						if FileAccess.file_exists(temp_path):
 							var bytes = FileAccess.get_file_as_bytes(temp_path)
 							_send_scene_bytes_to_peer(scene_path, bytes, id)
@@ -835,6 +860,12 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 					var res = load(value)
 					if res:
 						node.set(prop_name, res)
+				elif network.get("is_standalone_server"):
+					# Standalone server cannot load imported resources. Create a dummy.
+					var dummy_path = network._get_or_create_dummy_resource(value, "Resource") # Default to Resource, Godot will accept it in scripts, but might drop for typed props.
+					var dummy_res = load(dummy_path)
+					if dummy_res:
+						node.set(prop_name, dummy_res)
 				else:
 					# Push to pending queue waiting for file sync to complete
 					_pending_resource_properties.append({"id": id, "prop_name": prop_name, "value": value, "scene_path": scene_path, "retries": 100}) # About 1-2 seconds at 60 FPS
@@ -997,6 +1028,7 @@ func request_scene_state(scene_path: String):
 		if err == OK:
 			var temp_path = "user://temp_scene_state_" + str(multiplayer.get_unique_id()) + ".tscn"
 			if ResourceSaver.save(packed, temp_path) == OK:
+				network._restore_dummy_paths_in_file(temp_path)
 				if FileAccess.file_exists(temp_path):
 					var bytes = FileAccess.get_file_as_bytes(temp_path)
 					var total_size = bytes.size()

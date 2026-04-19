@@ -376,6 +376,71 @@ func request_push_scene(client_scene_path: String = ""):
 		else:
 			push_current_scene_to_peer(multiplayer.get_remote_sender_id())
 
+
+# Maps dummy resource paths back to original paths
+var _dummy_path_to_original = {}
+var _original_to_dummy_path = {}
+
+func _get_or_create_dummy_resource(original_path: String, type: String) -> String:
+	if _original_to_dummy_path.has(original_path):
+		return _original_to_dummy_path[original_path]
+
+	var md5 = original_path.md5_text()
+	var dummy_path = "user://tc_dummy_" + md5 + ".tres"
+
+	_dummy_path_to_original[dummy_path] = original_path
+	_original_to_dummy_path[original_path] = dummy_path
+
+	if not FileAccess.file_exists(dummy_path):
+		var res = null
+
+		# If type is empty/generic, try to infer it from the extension
+		if type == "" or type == "Resource":
+			var ext = original_path.get_extension().to_lower()
+			if ext in ["png", "jpg", "jpeg", "webp", "svg", "bmp"]: type = "Texture2D"
+			elif ext in ["obj", "blend", "gltf", "glb"]: type = "ArrayMesh"
+			elif ext in ["material"]: type = "StandardMaterial3D"
+			elif ext in ["wav", "mp3", "ogg"]: type = "AudioStreamWAV" # AudioStream
+
+		if ClassDB.can_instantiate(type):
+			res = ClassDB.instantiate(type)
+		if not res:
+			if "Texture" in type:
+				res = PlaceholderTexture2D.new()
+			elif "Material" in type:
+				res = StandardMaterial3D.new()
+			elif "Mesh" in type:
+				res = ArrayMesh.new()
+			elif "Audio" in type:
+				res = AudioStreamWAV.new()
+			else:
+				res = Resource.new()
+		ResourceSaver.save(res, dummy_path)
+
+	return dummy_path
+
+func _restore_dummy_paths_in_file(file_path: String):
+	if _dummy_path_to_original.is_empty():
+		return
+
+	var file = FileAccess.open(file_path, FileAccess.READ)
+	if not file: return
+	var text = file.get_as_text()
+	file.close()
+
+	var modified = false
+	for dummy_path in _dummy_path_to_original:
+		if text.find(dummy_path) != -1:
+			var orig = _dummy_path_to_original[dummy_path]
+			text = text.replace(dummy_path, orig)
+			modified = true
+
+	if modified:
+		var wfile = FileAccess.open(file_path, FileAccess.WRITE)
+		if wfile:
+			wfile.store_string(text)
+			wfile.close()
+
 func sync_project_settings():
 	if file_sync:
 		file_sync.sync_project_settings()
