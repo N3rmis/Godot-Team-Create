@@ -32,12 +32,30 @@ func _safe_load_headless(path: String) -> Dictionary:
 
 	var is_modified = false
 	var regex2 = RegEx.new()
-	regex2.compile("\\[ext_resource.*?type=\"(?<type>.*?)\".*?path=\"(?<path>res://.*?)\".*?\\]")
+	regex2.compile("\\[ext_resource.*?\\]")
 	var matches = regex2.search_all(text)
+
+	var path_regex = RegEx.new()
+	path_regex.compile("path=\"(res://[^\"]+)\"")
+
+	var type_regex = RegEx.new()
+	type_regex.compile("type=\"([^\"]+)\"")
+
 	for m in matches:
 		var full_match = m.get_string()
-		var type = m.get_string("type")
-		var orig_path = m.get_string("path")
+
+		var type = ""
+		var type_match = type_regex.search(full_match)
+		if type_match:
+			type = type_match.get_string(1)
+
+		var orig_path = ""
+		var path_match = path_regex.search(full_match)
+		if path_match:
+			orig_path = path_match.get_string(1)
+
+		if orig_path == "":
+			continue
 		var test_res_exists = ResourceLoader.exists(orig_path)
 		if not test_res_exists:
 			var dummy_path = network._get_or_create_dummy_resource(orig_path, type)
