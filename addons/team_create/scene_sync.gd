@@ -57,6 +57,17 @@ func _safe_load_headless(path: String) -> Dictionary:
 		if orig_path == "":
 			continue
 		var test_res_exists = ResourceLoader.exists(orig_path)
+		if test_res_exists:
+			var import_path = orig_path + ".import"
+			if FileAccess.file_exists(import_path):
+				var config = ConfigFile.new()
+				var err = config.load(import_path)
+				if err == OK:
+					var dest_files = config.get_value("deps", "dest_files", [])
+					for dest_file in dest_files:
+						if not FileAccess.file_exists(dest_file):
+							test_res_exists = false
+							break
 		if not test_res_exists:
 			var dummy_path = network._get_or_create_dummy_resource(orig_path, type)
 
