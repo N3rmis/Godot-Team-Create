@@ -349,7 +349,13 @@ func _check_single_node_changes(node: Node):
 					else:
 						# Serialize local sub-resources or resources without a file path
 						var bytes = var_to_bytes_with_objects(val)
-						current_props[p.name] = {"sub_resource_bytes": bytes, "resource_path": val.resource_path}
+						var temp_path = "user://tc_sync_export_" + str(val.get_instance_id()) + ".tres"
+						ResourceSaver.save(val, temp_path)
+						var text = ""
+						if FileAccess.file_exists(temp_path):
+							text = FileAccess.get_file_as_string(temp_path)
+							DirAccess.remove_absolute(temp_path)
+						current_props[p.name] = {"sub_resource_bytes": bytes, "sub_resource_text": text, "resource_path": val.resource_path}
 			else:
 				current_props[p.name] = val
 
@@ -680,7 +686,13 @@ func _sync_all_node_properties(node: Node, id: String):
 							current_props[p.name] = val.resource_path
 						else:
 							var bytes = var_to_bytes_with_objects(val)
-							current_props[p.name] = {"sub_resource_bytes": bytes, "resource_path": val.resource_path}
+							var temp_path = "user://tc_sync_export_" + str(val.get_instance_id()) + ".tres"
+							ResourceSaver.save(val, temp_path)
+							var text = ""
+							if FileAccess.file_exists(temp_path):
+								text = FileAccess.get_file_as_string(temp_path)
+								DirAccess.remove_absolute(temp_path)
+							current_props[p.name] = {"sub_resource_bytes": bytes, "sub_resource_text": text, "resource_path": val.resource_path}
 				else:
 					current_props[p.name] = val
 
