@@ -45,7 +45,9 @@ class DummyEditorInterface:
 
 	func restart_editor():
 		print("Restarting standalone server...")
-		if OS.has_method("create_instance"):
+		if OS.has_method("set_restart_on_exit"):
+			OS.set_restart_on_exit(true, OS.get_cmdline_args())
+		elif OS.has_method("create_instance"):
 			OS.create_instance(OS.get_cmdline_args())
 		elif OS.has_method("create_process"):
 			OS.create_process(OS.get_executable_path(), OS.get_cmdline_args())
