@@ -173,8 +173,9 @@ func _deferred_restart():
 	var exec_path = OS.get_executable_path()
 	var args = OS.get_cmdline_args()
 
-	# Try OS.create_instance first (Godot 4.3+)
-	if OS.has_method("create_instance"):
+	if OS.has_method("set_restart_on_exit"):
+		OS.set_restart_on_exit(true, args)
+	elif OS.has_method("create_instance"):
 		OS.create_instance(args)
 	elif OS.has_method("create_process"):
 		OS.create_process(exec_path, args)
