@@ -17,12 +17,13 @@ var _failed_load_timers = {}
 
 
 func _safe_load_headless(path: String) -> Dictionary:
-	var packed = load(path)
-	if packed and packed is PackedScene:
-		return {"packed": packed, "is_dummy": false}
-
 	if not network.get("is_standalone_server"):
+		var packed = load(path)
+		if packed and packed is PackedScene:
+			return {"packed": packed, "is_dummy": false}
 		return {"packed": null, "is_dummy": false}
+
+
 
 	var file = FileAccess.open(path, FileAccess.READ)
 	if not file: return {"packed": null, "is_dummy": false}
@@ -37,8 +38,8 @@ func _safe_load_headless(path: String) -> Dictionary:
 		var full_match = m.get_string()
 		var type = m.get_string("type")
 		var orig_path = m.get_string("path")
-		var test_res = load(orig_path)
-		if not test_res:
+		var test_res_exists = ResourceLoader.exists(orig_path)
+		if not test_res_exists:
 			var dummy_path = network._get_or_create_dummy_resource(orig_path, type)
 
 			var new_block = full_match.replace('path="' + orig_path + '"', 'path="' + dummy_path + '"')
