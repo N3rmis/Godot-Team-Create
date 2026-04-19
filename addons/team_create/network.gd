@@ -403,21 +403,21 @@ func _get_or_create_dummy_resource(original_path: String, type: String) -> Strin
 			elif ext in ["material"]: type = "StandardMaterial3D"
 			elif ext in ["wav", "mp3", "ogg"]: type = "AudioStreamWAV" # AudioStream
 
-		if ClassDB.can_instantiate(type):
+		if "Texture" in type:
+			res = PlaceholderTexture2D.new()
+		elif "Material" in type:
+			res = StandardMaterial3D.new()
+		elif "Mesh" in type:
+			res = ArrayMesh.new()
+		elif "Audio" in type:
+			res = AudioStreamWAV.new()
+		elif "Script" in type:
+			res = GDScript.new()
+		elif ClassDB.can_instantiate(type):
 			res = ClassDB.instantiate(type)
+
 		if not res:
-			if "Texture" in type:
-				res = PlaceholderTexture2D.new()
-			elif "Material" in type:
-				res = StandardMaterial3D.new()
-			elif "Mesh" in type:
-				res = ArrayMesh.new()
-			elif "Audio" in type:
-				res = AudioStreamWAV.new()
-			elif "Script" in type:
-				res = GDScript.new()
-			else:
-				res = Resource.new()
+			res = Resource.new()
 		ResourceSaver.save(res, dummy_path)
 
 	return dummy_path
