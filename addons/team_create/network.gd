@@ -404,7 +404,7 @@ func _get_or_create_dummy_resource(original_path: String, type: String) -> Strin
 			elif ext in ["wav", "mp3", "ogg"]: type = "AudioStreamWAV" # AudioStream
 
 		if "Texture" in type:
-			res = PlaceholderTexture2D.new()
+			res = GradientTexture2D.new()
 		elif "Material" in type:
 			res = StandardMaterial3D.new()
 		elif "Mesh" in type:
