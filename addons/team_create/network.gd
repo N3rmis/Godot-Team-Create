@@ -414,6 +414,8 @@ func _get_or_create_dummy_resource(original_path: String, type: String) -> Strin
 				res = ArrayMesh.new()
 			elif "Audio" in type:
 				res = AudioStreamWAV.new()
+			elif "Script" in type:
+				res = GDScript.new()
 			else:
 				res = Resource.new()
 		ResourceSaver.save(res, dummy_path)

@@ -37,20 +37,26 @@ func _safe_load_headless(path: String) -> Dictionary:
 		var full_match = m.get_string()
 		var type = m.get_string("type")
 		var orig_path = m.get_string("path")
-		if not ResourceLoader.exists(orig_path):
+		var test_res = load(orig_path)
+		if not test_res:
 			var dummy_path = network._get_or_create_dummy_resource(orig_path, type)
 
-			var new_block = '[ext_resource type="' + type + '" path="' + dummy_path + '"'
-			var id_regex = RegEx.new()
-			id_regex.compile("id=\"(.*?)\"")
-			var id_match = id_regex.search(full_match)
-			if id_match:
-				new_block += ' id="' + id_match.get_string(1) + '"]'
-			else:
-				new_block += "]"
+			var new_block = full_match.replace('path="' + orig_path + '"', 'path="' + dummy_path + '"')
+			var uid_regex = RegEx.new()
+			uid_regex.compile('uid="uid://.*?"\\s*')
+			var uid_match = uid_regex.search(new_block)
+			if uid_match:
+				new_block = new_block.replace(uid_match.get_string(), "")
 
 			text = text.replace(full_match, new_block)
 			is_modified = true
+
+	if is_modified:
+		var scene_regex = RegEx.new()
+		scene_regex.compile("\\[gd_scene.*?(uid=\"uid://.*?\").*?\\]")
+		var scene_match = scene_regex.search(text)
+		if scene_match:
+			text = text.replace(scene_match.get_string(1), "")
 
 	var temp_path = path + ".server_temp.tscn"
 	var temp_file = FileAccess.open(temp_path, FileAccess.WRITE)
@@ -856,10 +862,12 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 
 				# It's a resource path
 				var is_downloading = network and network.file_sync and value in network.file_sync.downloading_files
+				var res = null
 				if not is_downloading and ResourceLoader.exists(value):
-					var res = load(value)
-					if res:
-						node.set(prop_name, res)
+					res = load(value)
+
+				if res:
+					node.set(prop_name, res)
 				elif network.get("is_standalone_server"):
 					# Standalone server cannot load imported resources. Create a dummy.
 					var dummy_path = network._get_or_create_dummy_resource(value, "Resource") # Default to Resource, Godot will accept it in scripts, but might drop for typed props.
