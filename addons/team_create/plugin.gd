@@ -5,8 +5,6 @@ var dock: Control
 var network: Node
 
 func _enter_tree() -> void:
-	network.tc_print("Team Create initialized.")
-
 	# Load UI script and instantiate it.
 	# We're building the UI dynamically to ensure stability and match the screenshot.
 	var ui_script = load("res://addons/team_create/ui.gd")
@@ -24,6 +22,8 @@ func _enter_tree() -> void:
 	network = network_script.new()
 	network.name = "TeamCreateNetwork"
 	get_tree().root.add_child(network)
+
+	network.tc_print("Team Create initialized.")
 
 	# Link UI and network
 	dock.network = network
