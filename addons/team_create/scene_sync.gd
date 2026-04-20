@@ -360,6 +360,25 @@ func _check_single_node_changes(node: Node):
 			else:
 				current_props[p.name] = val
 
+	var connections = []
+	var signals = node.get_signal_list()
+	for sig in signals:
+		var conns = node.get_signal_connection_list(sig.name)
+		for c in conns:
+			if c.flags & CONNECT_PERSIST:
+				var target_obj = c.callable.get_object()
+				if target_obj is Node:
+					var target_id = network.assign_unique_id(target_obj)
+					connections.append({
+						"signal": sig.name,
+						"target_id": target_id,
+						"method": c.callable.get_method(),
+						"flags": c.flags,
+						"unbinds": c.callable.get_unbound_arguments_count() if c.callable.get_unbound_arguments_count() > 0 else 0,
+						"binds": c.callable.get_bound_arguments()
+					})
+	current_props["__connections__"] = connections
+
 	if not _last_tracked_properties.has(id):
 		_last_tracked_properties[id] = current_props
 	else:
@@ -699,6 +718,26 @@ func _sync_all_node_properties(node: Node, id: String):
 
 	default_node.free()
 
+	var connections = []
+	var signals = node.get_signal_list()
+	for sig in signals:
+		var conns = node.get_signal_connection_list(sig.name)
+		for c in conns:
+			if c.flags & CONNECT_PERSIST:
+				var target_obj = c.callable.get_object()
+				if target_obj is Node:
+					var target_id = network.assign_unique_id(target_obj)
+					connections.append({
+						"signal": sig.name,
+						"target_id": target_id,
+						"method": c.callable.get_method(),
+						"flags": c.flags,
+						"unbinds": c.callable.get_unbound_arguments_count() if c.callable.get_unbound_arguments_count() > 0 else 0,
+						"binds": c.callable.get_bound_arguments()
+					})
+	if connections.size() > 0:
+		current_props["__connections__"] = connections
+
 	if not _last_tracked_properties.has(id):
 		_last_tracked_properties[id] = current_props
 	else:
@@ -942,6 +981,8 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 							res.take_over_path(path)
 
 					node.set(prop_name, res)
+			elif prop_name == "__connections__":
+				_apply_connections(node, value, current_scene)
 			else:
 				node.set(prop_name, value)
 
@@ -1473,3 +1514,22 @@ func _get_local_cursor_data() -> Dictionary:
 				result.pos_2d = _cached_2d_viewport.get_global_mouse_position()
 
 	return result
+
+func _apply_connections(node: Node, connections_data: Array, current_scene: Node):
+	# First disconnect existing persistent connections to avoid duplicates
+	var signals = node.get_signal_list()
+	for sig in signals:
+		var conns = node.get_signal_connection_list(sig.name)
+		for c in conns:
+			if c.flags & CONNECT_PERSIST:
+				node.disconnect(sig.name, c.callable)
+
+	for c_data in connections_data:
+		var target = network.get_node_by_unique_id(current_scene, c_data["target_id"])
+		if is_instance_valid(target):
+			var callable = Callable(target, c_data["method"])
+			if c_data.has("binds") and typeof(c_data["binds"]) == TYPE_ARRAY and c_data["binds"].size() > 0:
+				callable = callable.bindv(c_data["binds"])
+			if c_data.has("unbinds") and c_data["unbinds"] > 0:
+				callable = callable.unbind(c_data["unbinds"])
+			node.connect(c_data["signal"], callable, c_data["flags"])
