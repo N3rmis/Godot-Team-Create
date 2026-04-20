@@ -40,15 +40,15 @@ func _is_safe_path(p: String) -> bool:
 
 	var rel_path = "res://" + target.trim_prefix(base_res)
 
-	var blocked_dirs = ["addons/team_create", ".godot", "webrtc"]
+	var blocked_dirs = ["addons/team_create", "webrtc"]
 	for d in blocked_dirs:
 		if rel_path == "res://" + d or rel_path.begins_with("res://" + d + "/"):
 			return false
 
-	if rel_path == "res://project.godot":
+	if rel_path == "res://.godot" or (rel_path.begins_with("res://.godot/") and not rel_path.begins_with("res://.godot/imported/")):
 		return false
 
-	if rel_path.ends_with(".import") or rel_path.ends_with(".ctex") or rel_path.ends_with(".stex"):
+	if rel_path == "res://project.godot":
 		return false
 
 	return true
@@ -156,21 +156,24 @@ func sync_all_files_to_peer(id: int):
 			file_hashes[path] = _get_cached_md5(path)
 		rpc_id(id, "compare_and_sync_files", file_hashes)
 
-func get_all_files(dir_path: String, exclude_dirs: Array = ["res://.godot", "res://webrtc"]) -> Array:
+func get_all_files(dir_path: String, exclude_dirs: Array = ["res://webrtc"]) -> Array:
 	var files = []
 	var dir = DirAccess.open(dir_path)
 	if dir:
 		dir.list_dir_begin()
 		var file_name = dir.get_next()
 		while file_name != "":
-			if dir.current_is_dir() and not file_name.begins_with("."):
+			if dir.current_is_dir():
 				var sub_dir = dir_path.path_join(file_name)
-				if not exclude_dirs.has(sub_dir):
-					files.append_array(get_all_files(sub_dir, exclude_dirs))
+				if sub_dir == "res://.godot":
+					if not exclude_dirs.has(sub_dir):
+						var imported_dir = sub_dir.path_join("imported")
+						if DirAccess.dir_exists_absolute(imported_dir):
+							files.append_array(get_all_files(imported_dir, exclude_dirs))
+				elif not file_name.begins_with("."):
+					if not exclude_dirs.has(sub_dir):
+						files.append_array(get_all_files(sub_dir, exclude_dirs))
 			elif not dir.current_is_dir() and not file_name.begins_with("."):
-				if file_name.ends_with(".import") or file_name.ends_with(".ctex") or file_name.ends_with(".stex"):
-					file_name = dir.get_next()
-					continue
 
 				# Convert local .tmp files to real assets instantly, as requested.
 				var full_path = dir_path.path_join(file_name)

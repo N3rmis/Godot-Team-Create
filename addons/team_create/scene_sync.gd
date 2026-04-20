@@ -951,7 +951,7 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 @rpc("any_peer", "reliable")
 func receive_scene(path: String, transfer_id: int, bytes: PackedByteArray, is_final: bool = true):
 	# Validate path to prevent directory traversal
-	if path.begins_with("res://addons/team_create") or path.begins_with("res://.godot") or path.begins_with("res://webrtc"):
+	if path.begins_with("res://addons/team_create") or (path.begins_with("res://.godot") and not path.begins_with("res://.godot/imported/")) or path.begins_with("res://webrtc"):
 		printerr("Team Create: Unauthorized scene access: ", path)
 		return
 	if not path.begins_with("res://") or ".." in path:
@@ -1106,7 +1106,7 @@ func request_scene_state(scene_path: String):
 
 @rpc("any_peer", "reliable")
 func receive_scene_state(path: String, transfer_id: int, bytes: PackedByteArray, is_final: bool = true):
-	if path.begins_with("res://addons/team_create") or path.begins_with("res://.godot") or path.begins_with("res://webrtc"):
+	if path.begins_with("res://addons/team_create") or (path.begins_with("res://.godot") and not path.begins_with("res://.godot/imported/")) or path.begins_with("res://webrtc"):
 		printerr("Team Create: Unauthorized scene state access: ", path)
 		return
 	if not path.begins_with("res://") or ".." in path:
