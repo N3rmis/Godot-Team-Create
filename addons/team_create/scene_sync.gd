@@ -179,7 +179,8 @@ func _save_server_tracked_scenes():
 						if final_f:
 							final_f.store_string(t_text)
 							final_f.close()
-							print("Server automatically saved tracked scene: ", path)
+							if network.auto_save_prints_enabled:
+								network.tc_print("Server automatically saved tracked scene: ", path)
 					DirAccess.remove_absolute(temp_save_path)
 
 			for data in outlines:
@@ -1018,7 +1019,7 @@ func receive_scene(path: String, transfer_id: int, bytes: PackedByteArray, is_fi
 				_force_full_sync_next_frame = true
 
 				editor.reload_scene_from_path(path)
-				print("Team Create: Applying received scene to active view.")
+				network.tc_print("Team Create: Applying received scene to active view.")
 
 				get_tree().create_timer(0.5).timeout.connect(func():
 					_is_reloading_scene = false
@@ -1034,14 +1035,14 @@ func receive_scene(path: String, transfer_id: int, bytes: PackedByteArray, is_fi
 				if prev_path != "":
 					editor.open_scene_from_path(prev_path)
 
-				print("Team Create: Closed updated background scene tab: ", path)
+				network.tc_print("Team Create: Closed updated background scene tab: ", path)
 
 	if bytes.size() > 0:
 		var file = FileAccess.open(path, FileAccess.WRITE)
 		if file:
 			file.store_buffer(bytes)
 			file.close()
-			print("Received scene: ", path)
+			network.tc_print("Received scene: ", path)
 
 @rpc("any_peer", "reliable")
 func request_scene_state(scene_path: String):
@@ -1132,7 +1133,7 @@ func receive_scene_state(path: String, transfer_id: int, bytes: PackedByteArray,
 		if file:
 			file.store_buffer(bytes)
 			file.close()
-			print("Team Create: Received up-to-date scene state for ", path)
+			network.tc_print("Team Create: Received up-to-date scene state for ", path)
 
 		if network and network.plugin:
 			if network.get("is_standalone_server"):

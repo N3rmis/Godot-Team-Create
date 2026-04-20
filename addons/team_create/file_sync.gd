@@ -190,7 +190,7 @@ func get_all_files(dir_path: String, exclude_dirs: Array = ["res://webrtc"]) -> 
 
 					DirAccess.rename_absolute(full_path, real_path)
 					files.append(real_path)
-					print("Converted temporary file to real asset: ", real_path)
+					network.tc_print("Converted temporary file to real asset: ", real_path)
 					# Trigger editor refresh
 					if network and network.plugin:
 						network.plugin.get_editor_interface().get_resource_filesystem().scan()
@@ -216,7 +216,7 @@ func receive_project_settings(bytes: PackedByteArray):
 	if file:
 		file.store_buffer(bytes)
 		file.close()
-		print("Project settings updated.")
+		network.tc_print("Project settings updated.")
 
 @rpc("any_peer", "reliable")
 func compare_and_sync_files(peer_hashes: Dictionary):
@@ -237,7 +237,7 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 				DirAccess.remove_absolute(path)
 				if _file_hash_cache.has(path):
 					_file_hash_cache.erase(path)
-				print("Deleted unused file: ", path)
+				network.tc_print("Deleted unused file: ", path)
 
 	# Request differing files
 	var files_to_request = []
@@ -347,7 +347,7 @@ func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_fin
 		var open_scenes = ei.get_open_scenes()
 
 		if current_scene and current_scene.scene_file_path == path:
-			print("Team Create: Applying received file to active scene view.")
+			network.tc_print("Team Create: Applying received file to active scene view.")
 			if bytes.size() > 0:
 				var file = FileAccess.open(path, FileAccess.WRITE)
 				if file:
@@ -379,7 +379,7 @@ func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_fin
 			ei.close_scene()
 			if prev_path != "":
 				ei.open_scene_from_path(prev_path)
-			print("Team Create: Closed background scene tab: ", path)
+			network.tc_print("Team Create: Closed background scene tab: ", path)
 			# We DO write the file below since it's no longer open.
 
 	# Ensure directory exists before writing
@@ -399,9 +399,9 @@ func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_fin
 			if file:
 				file.store_buffer(bytes)
 				file.close()
-				print("Received and updated file: ", path)
+				network.tc_print("Received and updated file: ", path)
 		else:
-			print("File unchanged, skipped writing: ", path)
+			network.tc_print("File unchanged, skipped writing: ", path)
 
 		# Trigger Editor resource scan if it's an asset, debounced to prevent premature imports generating new UIDs
 		if network.plugin and network.plugin.get_editor_interface().get_resource_filesystem():
@@ -436,7 +436,7 @@ func remote_delete_file(path: String):
 		DirAccess.remove_absolute(path)
 		if _file_hash_cache.has(path):
 			_file_hash_cache.erase(path)
-		print("Team Create: Replicated file deletion: ", path)
+		network.tc_print("Team Create: Replicated file deletion: ", path)
 
 		# Remove from known files
 		if _known_files.has(path):

@@ -5,7 +5,7 @@ var dock: Control
 var network: Node
 
 func _enter_tree() -> void:
-	print("Team Create initialized.")
+	network.tc_print("Team Create initialized.")
 
 	# Load UI script and instantiate it.
 	# We're building the UI dynamically to ensure stability and match the screenshot.
@@ -62,7 +62,7 @@ func check_for_updates() -> void:
 	var timestamp = str(Time.get_unix_time_from_system())
 	var error = http_request.request("https://raw.githubusercontent.com/N3rmis/Godot-Team-Create/main/addons/team_create/plugin.cfg", headers)
 	if error != OK:
-		print("An error occurred in the HTTP request.")
+		network.tc_print("An error occurred in the HTTP request.")
 
 func _http_request_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, http_request: HTTPRequest) -> void:
 	if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:
@@ -76,15 +76,15 @@ func _http_request_completed(result: int, response_code: int, headers: PackedStr
 
 		var current_version = get_current_version()
 		if latest_version != "" and latest_version != current_version:
-			print("Team Create update available: " + latest_version + " (Current: " + current_version + ")")
+			network.tc_print("Team Create update available: " + latest_version + " (Current: " + current_version + ")")
 			_prompt_update(latest_version)
 		else:
-			print("Team Create is up to date.")
+			network.tc_print("Team Create is up to date.")
 			if dock and dock.update_btn:
 				dock.update_btn.text = "Up to date!"
 				dock.update_btn.disabled = false
 	else:
-		print("Failed to check for updates. Result: " + str(result) + ", Code: " + str(response_code))
+		network.tc_print("Failed to check for updates. Result: " + str(result) + ", Code: " + str(response_code))
 		if dock and dock.update_btn:
 			dock.update_btn.text = "Check Failed"
 			dock.update_btn.disabled = false
@@ -133,14 +133,14 @@ func download_update() -> void:
 	var headers = ["User-Agent: Godot-Team-Create-Plugin"]
 	var error = http_request.request("https://github.com/N3rmis/Godot-Team-Create/archive/refs/heads/main.zip", headers)
 	if error != OK:
-		print("An error occurred in the HTTP download request.")
+		network.tc_print("An error occurred in the HTTP download request.")
 		_reset_update_button()
 
 func _download_request_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, http_request: HTTPRequest) -> void:
 	if result == HTTPRequest.RESULT_SUCCESS and (response_code == 200 or response_code == 301 or response_code == 302):
 		_extract_and_apply_update("user://team_create_update.zip")
 	else:
-		print("Failed to download update. Response code: " + str(response_code))
+		network.tc_print("Failed to download update. Response code: " + str(response_code))
 		_reset_update_button()
 
 	http_request.queue_free()
@@ -150,7 +150,7 @@ func _extract_and_apply_update(zip_path: String) -> void:
 	var zip_reader = ZIPReader.new()
 	var err = zip_reader.open(zip_path)
 	if err != OK:
-		print("Failed to open update zip.")
+		network.tc_print("Failed to open update zip.")
 		DirAccess.remove_absolute(zip_path)
 		_reset_update_button()
 		return
@@ -185,11 +185,11 @@ func _extract_and_apply_update(zip_path: String) -> void:
 				out_file.store_buffer(content)
 				out_file.close()
 			else:
-				print("Failed to write updated file: " + dest_path)
+				network.tc_print("Failed to write updated file: " + dest_path)
 
 	zip_reader.close()
 	DirAccess.remove_absolute(zip_path)
-	print("Update applied successfully! Restarting editor...")
+	network.tc_print("Update applied successfully! Restarting editor...")
 
 	if dock and dock.update_btn:
 		dock.update_btn.text = "Restarting..."
