@@ -32,6 +32,6 @@ You will see a `project/` folder along with `.bat` and `.sh` scripts. These scri
 ## Network Configuration
 By default, the standalone server hosts a standard Godot ENet LAN server on port **12345**.
 
-If your team is connecting over the internet (and you are not using WebRTC), you must ensure that **Port 12345 (UDP)** is forwarded on your router to the machine running the server.
+If your team is connecting over the internet, you must ensure that **Port 12345 (UDP)** is forwarded on your router to the machine running the server.
 
 Once the server is running, players can join by entering your machine's IP address into the **LAN Connection** box in their Godot editor and clicking **Join**.

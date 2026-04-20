@@ -506,20 +506,7 @@ func push_current_scene():
 						rpc("receive_scene", path, randi(), bytes, true)
 						return
 
-					if network and network.is_webrtc:
-						var chunk_size = 60000
-						var offset = 0
-						var transfer_id = randi()
-						while offset < total_size:
-							var end_idx = min(offset + chunk_size, total_size)
-							var chunk = bytes.slice(offset, end_idx)
-							var is_final = (end_idx == total_size)
-							rpc("receive_scene", path, transfer_id, chunk, is_final)
-							offset += chunk_size
-							if not is_final:
-								await get_tree().process_frame
-					else:
-						rpc("receive_scene", path, randi(), bytes, true)
+					rpc("receive_scene", path, randi(), bytes, true)
 
 func push_specific_scene_to_peer(scene_path: String, id: int):
 	if multiplayer.is_server():
@@ -576,20 +563,7 @@ func _send_scene_bytes_to_peer(path: String, bytes: PackedByteArray, id: int):
 		rpc_id(id, "receive_scene", path, randi(), bytes, true)
 		return
 
-	if network and network.is_webrtc:
-		var chunk_size = 60000
-		var offset = 0
-		var transfer_id = randi()
-		while offset < total_size:
-			var end_idx = min(offset + chunk_size, total_size)
-			var chunk = bytes.slice(offset, end_idx)
-			var is_final = (end_idx == total_size)
-			rpc_id(id, "receive_scene", path, transfer_id, chunk, is_final)
-			offset += chunk_size
-			if not is_final:
-				await get_tree().process_frame
-	else:
-		rpc_id(id, "receive_scene", path, randi(), bytes, true)
+	rpc_id(id, "receive_scene", path, randi(), bytes, true)
 
 func push_current_scene_to_peer(id: int):
 	if multiplayer.is_server():
@@ -878,32 +852,12 @@ func remote_node_renamed_exact(parent_id: String, old_name: String, new_name: St
 	_ignore_next_structure_event = false
 
 func _send_update_node_property(id: String, prop_name: String, value: Variant, scene_path: String = ""):
-	var needs_chunking = false
 	var bytes = PackedByteArray()
 
 	# Always serialize to check size
 	bytes = var_to_bytes_with_objects(value)
-	if network and network.is_webrtc and bytes.size() > 60000:
-		needs_chunking = true
 
-	if needs_chunking:
-		var chunk_size = 60000
-		var total_size = bytes.size()
-		var offset = 0
-		var transfer_id = randi()
-
-		if total_size == 0:
-			rpc("update_node_property_chunked", id, prop_name, transfer_id, bytes, scene_path, true)
-			return
-
-		while offset < total_size:
-			var end_idx = min(offset + chunk_size, total_size)
-			var chunk = bytes.slice(offset, end_idx)
-			var is_final = (end_idx == total_size)
-			rpc("update_node_property_chunked", id, prop_name, transfer_id, chunk, scene_path, is_final)
-			offset += chunk_size
-	else:
-		rpc("update_node_property", id, prop_name, value, scene_path)
+	rpc("update_node_property", id, prop_name, value, scene_path)
 
 @rpc("any_peer", "reliable")
 func update_node_property_chunked(id: String, prop_name: String, transfer_id: int, chunk: PackedByteArray, scene_path: String = "", is_final: bool = true):
@@ -993,7 +947,7 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 @rpc("any_peer", "reliable")
 func receive_scene(path: String, transfer_id: int, bytes: PackedByteArray, is_final: bool = true):
 	# Validate path to prevent directory traversal
-	if path.begins_with("res://addons/team_create") or (path.begins_with("res://.godot") and not path.begins_with("res://.godot/imported/")) or path.begins_with("res://webrtc"):
+	if path.begins_with("res://addons/team_create") or (path.begins_with("res://.godot") and not path.begins_with("res://.godot/imported/")):
 		printerr("Team Create: Unauthorized scene access: ", path)
 		return
 	if not path.begins_with("res://") or ".." in path:
@@ -1130,25 +1084,12 @@ func request_scene_state(scene_path: String):
 						DirAccess.remove_absolute(temp_path)
 						return
 
-					if network and network.is_webrtc:
-						var chunk_size = 60000
-						var offset = 0
-						var transfer_id = randi()
-						while offset < total_size:
-							var end_idx = min(offset + chunk_size, total_size)
-							var chunk = bytes.slice(offset, end_idx)
-							var is_final = (end_idx == total_size)
-							rpc_id(sender_id, "receive_scene_state", scene_path, transfer_id, chunk, is_final)
-							offset += chunk_size
-							if not is_final:
-								await get_tree().process_frame
-					else:
-						rpc_id(sender_id, "receive_scene_state", scene_path, randi(), bytes, true)
+					rpc_id(sender_id, "receive_scene_state", scene_path, randi(), bytes, true)
 				DirAccess.remove_absolute(temp_path)
 
 @rpc("any_peer", "reliable")
 func receive_scene_state(path: String, transfer_id: int, bytes: PackedByteArray, is_final: bool = true):
-	if path.begins_with("res://addons/team_create") or (path.begins_with("res://.godot") and not path.begins_with("res://.godot/imported/")) or path.begins_with("res://webrtc"):
+	if path.begins_with("res://addons/team_create") or (path.begins_with("res://.godot") and not path.begins_with("res://.godot/imported/")):
 		printerr("Team Create: Unauthorized scene state access: ", path)
 		return
 	if not path.begins_with("res://") or ".." in path:
