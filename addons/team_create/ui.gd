@@ -7,6 +7,7 @@ var network: Node
 var status_panel: PanelContainer
 var status_label: Label
 var users_label: RichTextLabel
+var server_msg_label: Label
 var ip_edit: LineEdit
 var username_edit: LineEdit
 var host_btn: Button
@@ -87,6 +88,12 @@ func _init() -> void:
 	status_label.text = "Status: Disconnected"
 	status_label.add_theme_color_override("font_color", Color.GRAY)
 	status_vbox.add_child(status_label)
+
+	server_msg_label = Label.new()
+	server_msg_label.add_theme_color_override("font_color", Color.YELLOW)
+	server_msg_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	server_msg_label.hide()
+	status_vbox.add_child(server_msg_label)
 
 	status_panel.hide()
 
@@ -448,6 +455,16 @@ func update_users_count(count: int) -> void:
 	else:
 		users_label.text = "Users: " + str(count)
 
+func show_server_message(msg: String) -> void:
+	if server_msg_label:
+		server_msg_label.text = msg
+		server_msg_label.show()
+		var t = get_tree().create_timer(5.0)
+		t.timeout.connect(func():
+			if is_instance_valid(server_msg_label):
+				server_msg_label.hide()
+		)
+
 func _on_username_changed(new_text: String) -> void:
 	if network:
 		if network.plugin:
@@ -547,4 +564,4 @@ func _on_export_dir_selected(dir: String) -> void:
 			# TODO: Add AcceptDialog popup on failure instead of just printing to console
 			exporter_script.export_server(dir, self)
 		else:
-			print("Failed to load server_exporter.gd")
+			network.tc_print("Failed to load server_exporter.gd")

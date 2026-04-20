@@ -30,6 +30,27 @@ var _local_username = ""
 var _console_thread: Thread
 var _console_should_exit: bool = false
 
+# Server commands config
+var auto_save_prints_enabled: bool = false
+var timeprint_enabled: bool = true
+var joins_enabled: bool = true
+
+
+func tc_print(msg: String, arg1="", arg2="", arg3=""):
+	var full_msg = msg + str(arg1) + str(arg2) + str(arg3)
+	if timeprint_enabled:
+		var time = Time.get_time_string_from_system()
+		print("<" + time + "> " + full_msg)
+	else:
+		print(full_msg)
+
+func tc_print_rich(msg: String, arg1="", arg2="", arg3=""):
+	var full_msg = msg + str(arg1) + str(arg2) + str(arg3)
+	if timeprint_enabled:
+		var time = Time.get_time_string_from_system()
+		print_rich("[color=gray]<" + time + ">[/color] " + full_msg)
+	else:
+		print_rich(full_msg)
 
 func _ready():
 	if is_standalone_server:
@@ -69,7 +90,7 @@ func _exit_tree():
 
 
 func _server_console_thread_func():
-	print_rich("[color=green]Server console ready. Type /help for a list of commands.[/color]")
+	tc_print_rich("[color=green]Server console ready. Type /help for a list of commands.[/color]")
 	while not _console_should_exit:
 		# OS.read_string_from_stdin is blocking. It will wake up when the user hits Enter.
 		var input = OS.read_string_from_stdin().strip_edges()
@@ -83,18 +104,77 @@ func _process_console_command(input: String):
 	var cmd = args[0].to_lower()
 
 	if cmd == "/help":
-		print_rich("[color=cyan]--- Available Commands ---[/color]")
-		print_rich("[color=white]/kick <user>[/color]   - Kicks a user from the server")
-		print_rich("[color=white]/list[/color]          - Lists all connected users")
-		print_rich("[color=white]/info[/color]          - Shows server statistics (memory, CPU, players, etc.)")
-		print_rich("[color=white]/update[/color]        - Downloads latest update and restarts the server")
-		print_rich("[color=white]/restart[/color]       - Restarts the server")
-		print_rich("[color=white]/stop[/color]          - Stops and exits the server")
-		print_rich("[color=cyan]--------------------------[/color]")
+		tc_print_rich("[color=cyan]--- Available Commands ---[/color]")
+		tc_print_rich("[color=white]/kick <user>[/color]   - Kicks a user from the server")
+		tc_print_rich("[color=white]/list[/color]          - Lists all connected users")
+		tc_print_rich("[color=white]/info[/color]          - Shows server statistics (memory, CPU, players, etc.)")
+		tc_print_rich("[color=white]/update[/color]        - Downloads latest update and restarts the server")
+		tc_print_rich("[color=white]/restart[/color]       - Restarts the server")
+		tc_print_rich("[color=white]/stop[/color]          - Stops and exits the server")
+		tc_print_rich("[color=white]/saveprints <true/false>[/color] - Toggles auto-save prints")
+		tc_print_rich("[color=white]/timeprint <true/false>[/color] - Toggles time prefix in prints")
+		tc_print_rich("[color=white]/togglejoins <true/false>[/color] - Toggles people joining the server")
+		tc_print_rich("[color=white]/msg <message>[/color]    - Shows a message to everyone")
+		tc_print_rich("[color=cyan]--------------------------[/color]")
+
+	elif cmd == "/saveprints":
+		if args.size() < 2:
+			tc_print_rich("[color=orange]Usage: /saveprints <true/false>[/color]")
+		else:
+			var val = args[1].to_lower()
+			if val == "true":
+				auto_save_prints_enabled = true
+				tc_print_rich("[color=green]Auto-save prints enabled.[/color]")
+			elif val == "false":
+				auto_save_prints_enabled = false
+				tc_print_rich("[color=green]Auto-save prints disabled.[/color]")
+			else:
+				tc_print_rich("[color=red]Invalid argument. Use true or false.[/color]")
+
+	elif cmd == "/timeprint":
+		if args.size() < 2:
+			tc_print_rich("[color=orange]Usage: /timeprint <true/false>[/color]")
+		else:
+			var val = args[1].to_lower()
+			if val == "true":
+				timeprint_enabled = true
+				tc_print_rich("[color=green]Time prints enabled.[/color]")
+			elif val == "false":
+				timeprint_enabled = false
+				tc_print_rich("[color=green]Time prints disabled.[/color]")
+			else:
+				tc_print_rich("[color=red]Invalid argument. Use true or false.[/color]")
+
+	elif cmd == "/togglejoins":
+		if args.size() < 2:
+			tc_print_rich("[color=orange]Usage: /togglejoins <true/false>[/color]")
+		else:
+			var val = args[1].to_lower()
+			if val == "true":
+				joins_enabled = true
+				if multiplayer.multiplayer_peer and multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+					multiplayer.multiplayer_peer.refuse_new_connections = false
+				tc_print_rich("[color=green]Joining is now enabled.[/color]")
+			elif val == "false":
+				joins_enabled = false
+				if multiplayer.multiplayer_peer and multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+					multiplayer.multiplayer_peer.refuse_new_connections = true
+				tc_print_rich("[color=green]Joining is now disabled.[/color]")
+			else:
+				tc_print_rich("[color=red]Invalid argument. Use true or false.[/color]")
+
+	elif cmd == "/msg":
+		if args.size() < 2:
+			tc_print_rich("[color=orange]Usage: /msg <message>[/color]")
+		else:
+			var msg = input.substr(args[0].length()).strip_edges()
+			rpc("show_message", msg)
+			show_message(msg)
+			tc_print_rich("[color=green]Message sent: " + msg + "[/color]")
 
 	elif cmd == "/kick":
 		if args.size() < 2:
-			print_rich("[color=orange]Usage: /kick <username>[/color]")
+			tc_print_rich("[color=orange]Usage: /kick <username>[/color]")
 		else:
 			var target_username = args[1]
 			var target_id = -1
@@ -104,24 +184,24 @@ func _process_console_command(input: String):
 					break
 			if target_id != -1:
 				if target_id == 1:
-					print_rich("[color=red]Cannot kick the server.[/color]")
+					tc_print_rich("[color=red]Cannot kick the server.[/color]")
 				else:
-					print_rich("[color=yellow]Kicking user: " + target_username + "[/color]")
+					tc_print_rich("[color=yellow]Kicking user: " + target_username + "[/color]")
 					call_deferred("kick_peer", target_id)
 			else:
-				print_rich("[color=red]User not found: " + target_username + "[/color]")
+				tc_print_rich("[color=red]User not found: " + target_username + "[/color]")
 
 	elif cmd == "/update":
-		print_rich("[color=cyan]Updating plugin and restarting server...[/color]")
+		tc_print_rich("[color=cyan]Updating plugin and restarting server...[/color]")
 		if plugin and plugin.has_method("download_update"):
 			call_deferred("_deferred_update_and_restart")
 		else:
-			print_rich("[color=red]Update mechanism not available.[/color]")
+			tc_print_rich("[color=red]Update mechanism not available.[/color]")
 
 	elif cmd == "/list":
-		print_rich("[color=cyan]Connected users:[/color]")
+		tc_print_rich("[color=cyan]Connected users:[/color]")
 		if is_webrtc:
-			print_rich("[color=gray] (IPs not available for WebRTC)[/color]")
+			tc_print_rich("[color=gray] (IPs not available for WebRTC)[/color]")
 		var count = 0
 		for id in peers.keys():
 			if id == 1:
@@ -130,36 +210,36 @@ func _process_console_command(input: String):
 			var ip_str = "N/A"
 			if not is_webrtc and multiplayer.multiplayer_peer is ENetMultiplayerPeer:
 				ip_str = multiplayer.multiplayer_peer.get_peer(id).get_remote_address()
-			print_rich("[color=white]- " + info["username"] + " (ID: " + str(id) + ", IP: " + ip_str + ")[/color]")
+			tc_print_rich("[color=white]- " + info["username"] + " (ID: " + str(id) + ", IP: " + ip_str + ")[/color]")
 			count += 1
-		print_rich("[color=green]Total users: " + str(count) + "[/color]")
+		tc_print_rich("[color=green]Total users: " + str(count) + "[/color]")
 
 	elif cmd == "/restart":
-		print_rich("[color=orange]Restarting server...[/color]")
+		tc_print_rich("[color=orange]Restarting server...[/color]")
 		call_deferred("_deferred_restart")
 
 	elif cmd == "/stop":
-		print_rich("[color=red]Stopping server...[/color]")
+		tc_print_rich("[color=red]Stopping server...[/color]")
 		call_deferred("_deferred_stop")
 
 	elif cmd == "/info":
-		print_rich("[color=cyan]--- Server Info ---[/color]")
-		print_rich("[color=white]Memory Usage:[/color] " + String.humanize_size(OS.get_static_memory_usage()))
-		print_rich("[color=white]Peak Memory Usage:[/color] " + String.humanize_size(OS.get_static_memory_peak_usage()))
+		tc_print_rich("[color=cyan]--- Server Info ---[/color]")
+		tc_print_rich("[color=white]Memory Usage:[/color] " + String.humanize_size(OS.get_static_memory_usage()))
+		tc_print_rich("[color=white]Peak Memory Usage:[/color] " + String.humanize_size(OS.get_static_memory_peak_usage()))
 		var cpu_usage = Performance.get_monitor(Performance.TIME_PROCESS) * Engine.get_frames_per_second() * 100.0
-		print_rich("[color=white]CPU Usage:[/color] " + ("%.2f" % cpu_usage) + "%")
+		tc_print_rich("[color=white]CPU Usage:[/color] " + ("%.2f" % cpu_usage) + "%")
 		var port = str(PORT) if not is_webrtc else "WebRTC"
 		var local_ip = "127.0.0.1"
 		for address in IP.get_local_addresses():
 			if address.split(".").size() == 4 and not address.begins_with("127.") and not address.begins_with("169.254."):
 				local_ip = address
 				break
-		print_rich("[color=white]Network:[/color] " + local_ip + ":" + str(port) if not is_webrtc else "[color=white]Network:[/color] WebRTC")
+		tc_print_rich("[color=white]Network:[/color] " + local_ip + ":" + str(port) if not is_webrtc else "[color=white]Network:[/color] WebRTC")
 		var user_count = peers.size() - 1 if peers.has(1) else peers.size()
-		print_rich("[color=white]Total users connected:[/color] " + str(user_count))
-		print_rich("[color=cyan]-------------------[/color]")
+		tc_print_rich("[color=white]Total users connected:[/color] " + str(user_count))
+		tc_print_rich("[color=cyan]-------------------[/color]")
 	else:
-		print_rich("[color=red]Unknown command: " + cmd + "[/color]")
+		tc_print_rich("[color=red]Unknown command: " + cmd + "[/color]")
 
 func _deferred_update_and_restart():
 	if plugin and plugin.has_method("download_update"):
@@ -180,7 +260,7 @@ func _deferred_restart():
 	elif OS.has_method("create_process"):
 		OS.create_process(exec_path, args)
 	else:
-		print("Restart not supported on this platform/version. Stopping instead.")
+		tc_print("Restart not supported on this platform/version. Stopping instead.")
 
 	_deferred_stop()
 
@@ -198,7 +278,7 @@ func kick_peer(id: int):
 			multiplayer.multiplayer_peer.disconnect_peer(id)
 		elif webrtc_peer:
 			webrtc_peer.remove_peer(id)
-		print("Kicked peer ", id)
+		tc_print("Kicked peer ", id)
 
 func update_local_username(new_name: String):
 	_local_username = new_name
@@ -242,7 +322,7 @@ func disconnect_peer():
 		ui.set_disconnected()
 	if file_sync:
 		file_sync._hide_sync_blocker()
-	print("Disconnected")
+	tc_print("Disconnected")
 
 func _add_peer(id: int):
 	if not peers.has(id):
@@ -254,7 +334,12 @@ func _add_peer(id: int):
 			peers[id] = _get_default_peer_info(id) # temporary fallback until server syncs
 
 func _on_peer_connected(id: int):
-	print("Peer connected: ", id)
+	if is_server and not joins_enabled:
+		tc_print("Rejected peer connection because joins are disabled: ", id)
+		call_deferred("kick_peer", id)
+		return
+
+	tc_print("Peer connected: ", id)
 	_add_peer(id)
 	if ui:
 		ui.update_users_count(peers.size())
@@ -277,7 +362,7 @@ func _on_peer_connected(id: int):
 
 
 func _on_peer_disconnected(id: int):
-	print("Peer disconnected: ", id)
+	tc_print("Peer disconnected: ", id)
 	if peers.has(id):
 		peers.erase(id)
 	if ui:
@@ -289,7 +374,7 @@ func _on_peer_disconnected(id: int):
 		scene_sync._clear_peer_cursor(id)
 
 func _on_connected_to_server():
-	print("Connected to server successfully!")
+	tc_print("Connected to server successfully!")
 	_add_peer(1) # Add server to peers list
 	_update_ui_state()
 
@@ -334,6 +419,13 @@ func sync_peer_info(id: int, info: Dictionary):
 		ui.update_users_count(peers.size())
 
 @rpc("any_peer", "reliable")
+func show_message(msg: String):
+	if multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0:
+		return
+	if ui and ui.has_method("show_server_message"):
+		ui.show_server_message(msg)
+
+@rpc("any_peer", "reliable")
 func request_username_change(id: int, new_username: String):
 	if is_server:
 		if peers.has(id) and (multiplayer.get_remote_sender_id() == id or multiplayer.get_remote_sender_id() == 0):
@@ -343,11 +435,11 @@ func request_username_change(id: int, new_username: String):
 			sync_peer_info(id, peers[id])
 
 func _on_connection_failed():
-	print("Connection to server failed.")
+	tc_print("Connection to server failed.")
 	disconnect_peer()
 
 func _on_server_disconnected():
-	print("Server disconnected.")
+	tc_print("Server disconnected.")
 	disconnect_peer()
 
 func _update_ui_state():
@@ -540,7 +632,7 @@ var downloading_webrtc = false
 func _download_webrtc():
 	if downloading_webrtc: return
 	downloading_webrtc = true
-	print("Downloading WebRTC extension...")
+	tc_print("Downloading WebRTC extension...")
 	if ui:
 		ui.webrtc_host_btn.text = "Downloading..."
 		ui.webrtc_join_btn.text = "Downloading..."
@@ -552,7 +644,7 @@ func _download_webrtc():
 	http_request.request_completed.connect(self._on_webrtc_download_completed.bind(http_request))
 	var error = http_request.request("https://github.com/godotengine/webrtc-native/releases/download/1.1.0-stable/godot-extension-webrtc.zip")
 	if error != OK:
-		print("Failed to start WebRTC download.")
+		tc_print("Failed to start WebRTC download.")
 		downloading_webrtc = false
 
 func _on_webrtc_download_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, http_request: HTTPRequest):
@@ -563,10 +655,10 @@ func _on_webrtc_download_completed(result: int, response_code: int, headers: Pac
 			file.close()
 			_extract_webrtc("user://webrtc_update.zip")
 		else:
-			print("Failed to save WebRTC zip file.")
+			tc_print("Failed to save WebRTC zip file.")
 			downloading_webrtc = false
 	else:
-		print("Failed to download WebRTC. Response code: " + str(response_code))
+		tc_print("Failed to download WebRTC. Response code: " + str(response_code))
 		downloading_webrtc = false
 	http_request.queue_free()
 
@@ -575,7 +667,7 @@ func _extract_webrtc(zip_path: String):
 	var zip_reader = ZIPReader.new()
 	var err = zip_reader.open(zip_path)
 	if err != OK:
-		print("Failed to open WebRTC zip.")
+		tc_print("Failed to open WebRTC zip.")
 		DirAccess.remove_absolute(zip_path)
 		downloading_webrtc = false
 		return
@@ -608,7 +700,7 @@ func _extract_webrtc(zip_path: String):
 		ignore_file.store_string("")
 		ignore_file.close()
 
-	print("WebRTC extension installed! Restarting editor...")
+	tc_print("WebRTC extension installed! Restarting editor...")
 	if ui:
 		ui.webrtc_host_btn.text = "Restarting..."
 		ui.webrtc_join_btn.text = "Restarting..."
@@ -624,7 +716,7 @@ func webrtc_host():
 
 	# Check if the native extension is actually loaded. If not, Godot creates the base extension wrapper.
 	if webrtc_connection.get_class() == "WebRTCPeerConnectionExtension":
-		print("WebRTC plugin missing or not loaded. Starting download...")
+		tc_print("WebRTC plugin missing or not loaded. Starting download...")
 		webrtc_connection = null
 		disconnect_peer()
 		_download_webrtc()
@@ -635,7 +727,7 @@ func webrtc_host():
 	})
 
 	if err != OK:
-		print("Failed to initialize WebRTC connection.")
+		tc_print("Failed to initialize WebRTC connection.")
 		webrtc_connection = null
 		disconnect_peer()
 		return
@@ -652,7 +744,7 @@ func webrtc_host():
 
 	webrtc_peer.add_peer(webrtc_connection, 2) # For manual 1-to-1 signaling
 
-	print("Generating WebRTC offer...")
+	tc_print("Generating WebRTC offer...")
 	webrtc_connection.create_offer()
 
 	if ui:
@@ -666,7 +758,7 @@ func webrtc_join():
 
 	# Check if the native extension is actually loaded. If not, Godot creates the base extension wrapper.
 	if webrtc_connection.get_class() == "WebRTCPeerConnectionExtension":
-		print("WebRTC plugin missing or not loaded. Starting download...")
+		tc_print("WebRTC plugin missing or not loaded. Starting download...")
 		webrtc_connection = null
 		disconnect_peer()
 		_download_webrtc()
@@ -677,7 +769,7 @@ func webrtc_join():
 	})
 
 	if err != OK:
-		print("Failed to initialize WebRTC connection.")
+		tc_print("Failed to initialize WebRTC connection.")
 		webrtc_connection = null
 		disconnect_peer()
 		return
@@ -692,7 +784,7 @@ func webrtc_join():
 	webrtc_connection.session_description_created.connect(_webrtc_offer_created)
 	webrtc_connection.ice_candidate_created.connect(_webrtc_ice_candidate_created)
 
-	print("Initializing WebRTC join...")
+	tc_print("Initializing WebRTC join...")
 	webrtc_peer.add_peer(webrtc_connection, 1)
 
 	if ui:
@@ -702,8 +794,8 @@ func webrtc_join():
 func _webrtc_offer_created(type: String, sdp: String):
 	local_sdp_type = type
 	local_sdp = sdp
-	print("WebRTC session description created: ", type)
-	print("Waiting for ICE candidates...")
+	tc_print("WebRTC session description created: ", type)
+	tc_print("Waiting for ICE candidates...")
 	webrtc_connection.set_local_description(type, sdp)
 	call_deferred("_update_webrtc_output")
 
@@ -717,7 +809,7 @@ func _update_webrtc_output():
 	if local_sdp_type == "":
 		return
 
-	print("Waiting 3 seconds for ICE candidates to gather...")
+	tc_print("Waiting 3 seconds for ICE candidates to gather...")
 	var timer = get_tree().create_timer(3.0)
 	await timer.timeout
 
@@ -740,9 +832,13 @@ func _update_webrtc_output():
 			ui.update_webrtc_text(encoded_str)
 
 func webrtc_confirm(encoded_str: String):
-	print("Parsing WebRTC connection string...")
+	if is_server and not joins_enabled:
+		tc_print("Cannot process WebRTC connection because joins are disabled.")
+		return
+
+	tc_print("Parsing WebRTC connection string...")
 	if not is_webrtc or not webrtc_connection:
-		print("WebRTC not initialized")
+		tc_print("WebRTC not initialized")
 		return
 
 	if ui:
@@ -752,7 +848,7 @@ func webrtc_confirm(encoded_str: String):
 
 	var json = JSON.new()
 	if json.parse(decoded_json_str) != OK:
-		print("Failed to parse JSON")
+		tc_print("Failed to parse JSON")
 		if ui:
 			ui.update_webrtc_instructions("Error: Failed to parse connection data. Please make sure you copied the entire string correctly.")
 			ui.enable_webrtc_confirm()
@@ -760,14 +856,14 @@ func webrtc_confirm(encoded_str: String):
 
 	var data = json.get_data()
 	if typeof(data) != TYPE_DICTIONARY:
-		print("Invalid JSON data")
+		tc_print("Invalid JSON data")
 		if ui:
 			ui.update_webrtc_instructions("Error: Invalid connection data format.")
 			ui.enable_webrtc_confirm()
 		return
 
 	if data.has("type") and data.has("sdp"):
-		print("Applying remote WebRTC description (", data["type"], ")...")
+		tc_print("Applying remote WebRTC description (", data["type"], ")...")
 		webrtc_connection.set_remote_description(data["type"], data["sdp"])
 
 		# If we are client joining, and we just got the offer, it automatically creates an answer
@@ -777,13 +873,13 @@ func webrtc_confirm(encoded_str: String):
 
 
 	if data.has("candidates"):
-		print("Adding ICE candidates to remote connection...")
-		print("Adding ", data["candidates"].size(), " ICE candidates...")
+		tc_print("Adding ICE candidates to remote connection...")
+		tc_print("Adding ", data["candidates"].size(), " ICE candidates...")
 		for cand in data["candidates"]:
 			if typeof(cand) == TYPE_DICTIONARY and cand.has("media") and cand.has("index") and cand.has("name"):
 				webrtc_connection.add_ice_candidate(cand["media"], cand["index"], cand["name"])
 			else:
-				print("Invalid ICE candidate format.")
+				tc_print("Invalid ICE candidate format.")
 
 func _init_editor_settings():
 	if Engine.is_editor_hint() and plugin and plugin.has_method("get_editor_interface"):
