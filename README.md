@@ -15,7 +15,7 @@ Basically, this is a Godot 4.* plugin that lets you and your friends jump into t
 ## What you need
 - Godot 4.0 or newer.
 - A decent internet connection between everyone.
-- OPTIONAL: Hosted server, LAN and WebRTC might not work for some!
+- OPTIONAL: Hosted server and LAN might not work for some!
 
 ## How to get it running
 1. Download the latest release.
@@ -39,24 +39,6 @@ Since this thing is barely holding together right now, any testing is a massive 
 1. Open the Team Create dock.
 2. Enter the Host's local IP address in the text box.
 3. Click **Join**.
-
-### WebRTC Connection
-WebRTC allows you to connect over the internet without port forwarding by copying and pasting a connection string (Offer/Answer and ICE candidates).
-
-**Host:**
-1. Open the Team Create dock.
-2. Click **WebRTC Host**.
-3. The plugin will generate a connection string containing your Offer and ICE candidates.
-4. Copy this connection string and send it to your friend.
-5. Wait for your friend to send back their Answer connection string.
-6. Paste their Answer connection string into the text box and click **Confirm**.
-
-**User (Join):**
-1. Open the Team Create dock.
-2. Click **WebRTC Join**.
-3. Paste the Host's Offer connection string into the text box and click **Confirm**.
-4. The plugin will process the Offer and automatically generate your Answer connection string.
-5. Copy your Answer connection string and send it back to the Host.
 
 <a href="https://www.star-history.com/?repos=N3rmis%2FGodot-Team-Create&type=date&logscale=&legend=top-left">
  <picture>

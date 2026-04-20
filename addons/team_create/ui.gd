@@ -14,29 +14,17 @@ var host_btn: Button
 var join_btn: Button
 var disconnect_btn: Button
 
-# WebRTC UI
-var webrtc_host_btn: Button
-var webrtc_join_btn: Button
-var webrtc_instructions: Label
-var webrtc_text: TextEdit
-var webrtc_confirm_btn: Button
 var push_scene_btn: Button
 var sync_settings_btn: Button
 var sync_files_btn: Button
 var update_btn: Button
-var webrtc_mode: int = 0
 
 var export_btn: Button
 var export_dialog: FileDialog
 
 
 var lan_container: VBoxContainer
-var webrtc_container: VBoxContainer
-var lan_tab_btn: Button
-var webrtc_tab_btn: Button
 var sync_status_btn: Button
-var active_tab_style: StyleBoxFlat
-var inactive_tab_style: StyleBoxFlat
 
 
 func _init() -> void:
@@ -139,41 +127,6 @@ func _init() -> void:
 	conn_header.add_theme_font_override("font", get_theme_font("bold", "Label"))
 	conn_vbox.add_child(conn_header)
 
-	var tab_hbox = HBoxContainer.new()
-	conn_vbox.add_child(tab_hbox)
-
-	active_tab_style = StyleBoxFlat.new()
-	active_tab_style.bg_color = Color(0.3, 0.3, 0.3, 1.0)
-	active_tab_style.corner_radius_top_left = 6
-	active_tab_style.corner_radius_top_right = 6
-	active_tab_style.corner_radius_bottom_left = 6
-	active_tab_style.corner_radius_bottom_right = 6
-
-	inactive_tab_style = StyleBoxFlat.new()
-	inactive_tab_style.bg_color = Color(0.15, 0.15, 0.15, 1.0)
-	inactive_tab_style.border_width_bottom = 2
-	inactive_tab_style.border_color = Color(0.3, 0.3, 0.3, 1.0)
-
-	lan_tab_btn = Button.new()
-	lan_tab_btn.text = "LAN"
-	lan_tab_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	lan_tab_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	lan_tab_btn.add_theme_stylebox_override("normal", active_tab_style)
-	lan_tab_btn.add_theme_stylebox_override("hover", active_tab_style)
-	lan_tab_btn.add_theme_stylebox_override("pressed", active_tab_style)
-	lan_tab_btn.pressed.connect(_on_lan_tab_pressed)
-	tab_hbox.add_child(lan_tab_btn)
-
-	webrtc_tab_btn = Button.new()
-	webrtc_tab_btn.text = "WebRTC"
-	webrtc_tab_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	webrtc_tab_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	webrtc_tab_btn.add_theme_stylebox_override("normal", inactive_tab_style)
-	webrtc_tab_btn.add_theme_stylebox_override("hover", active_tab_style)
-	webrtc_tab_btn.add_theme_stylebox_override("pressed", active_tab_style)
-	webrtc_tab_btn.pressed.connect(_on_webrtc_tab_pressed)
-	tab_hbox.add_child(webrtc_tab_btn)
-
 	# LAN Container
 	lan_container = VBoxContainer.new()
 	conn_vbox.add_child(lan_container)
@@ -206,51 +159,6 @@ func _init() -> void:
 	join_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	join_btn.pressed.connect(_on_join_pressed)
 	lan_btn_hbox.add_child(join_btn)
-
-	# WebRTC Container
-	webrtc_container = VBoxContainer.new()
-	webrtc_container.hide() # Hidden by default
-	conn_vbox.add_child(webrtc_container)
-
-	var webrtc_btn_hbox = HBoxContainer.new()
-	webrtc_container.add_child(webrtc_btn_hbox)
-
-	webrtc_host_btn = Button.new()
-	webrtc_host_btn.text = "Host"
-	webrtc_host_btn.tooltip_text = "Start a WebRTC session and generate a connection offer."
-	webrtc_host_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	webrtc_host_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	webrtc_host_btn.pressed.connect(_on_webrtc_host_pressed)
-	webrtc_btn_hbox.add_child(webrtc_host_btn)
-
-	webrtc_join_btn = Button.new()
-	webrtc_join_btn.text = "Join"
-	webrtc_join_btn.tooltip_text = "Join a WebRTC session and paste the host's offer below."
-	webrtc_join_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	webrtc_join_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	webrtc_join_btn.pressed.connect(_on_webrtc_join_pressed)
-	webrtc_btn_hbox.add_child(webrtc_join_btn)
-
-	webrtc_instructions = Label.new()
-	webrtc_instructions.text = "Click 'Host' or 'Join' to start."
-	webrtc_instructions.autowrap_mode = TextServer.AUTOWRAP_WORD
-	webrtc_instructions.add_theme_font_size_override("font_size", 12)
-	webrtc_instructions.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
-	webrtc_container.add_child(webrtc_instructions)
-
-	webrtc_text = TextEdit.new()
-	webrtc_text.custom_minimum_size = Vector2(0, 100)
-	webrtc_text.placeholder_text = "Paste WebRTC connection data here..."
-	webrtc_text.tooltip_text = "Copy/paste connection strings here to establish WebRTC peer connections."
-	webrtc_text.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	webrtc_container.add_child(webrtc_text)
-
-	webrtc_confirm_btn = Button.new()
-	webrtc_confirm_btn.text = "Confirm Connection Data"
-	webrtc_confirm_btn.tooltip_text = "Process the connection data pasted above."
-	webrtc_confirm_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	webrtc_confirm_btn.pressed.connect(_on_webrtc_confirm_pressed)
-	webrtc_container.add_child(webrtc_confirm_btn)
 
 	# Disconnect Button (shared at bottom of connectivity)
 	var disconnect_style = StyleBoxFlat.new()
@@ -355,21 +263,6 @@ func _init() -> void:
 	add_child(export_dialog)
 
 
-func _on_lan_tab_pressed() -> void:
-	lan_container.show()
-	webrtc_container.hide()
-
-	lan_tab_btn.add_theme_stylebox_override("normal", active_tab_style)
-	webrtc_tab_btn.add_theme_stylebox_override("normal", inactive_tab_style)
-
-func _on_webrtc_tab_pressed() -> void:
-	webrtc_container.show()
-	lan_container.hide()
-
-	webrtc_tab_btn.add_theme_stylebox_override("normal", active_tab_style)
-	lan_tab_btn.add_theme_stylebox_override("normal", inactive_tab_style)
-
-
 func _ready() -> void:
 	if network and network.plugin:
 		var settings = network.plugin.get_editor_interface().get_editor_settings()
@@ -382,12 +275,6 @@ func _ready() -> void:
 func set_connected(is_host: bool, connected_to_standalone: bool = false) -> void:
 	host_btn.disabled = true
 	join_btn.disabled = true
-	webrtc_host_btn.disabled = true
-	webrtc_join_btn.disabled = true
-	webrtc_confirm_btn.disabled = true
-	webrtc_host_btn.text = "Host"
-	webrtc_join_btn.text = "Join"
-	webrtc_mode = 0
 	disconnect_btn.disabled = false
 	push_scene_btn.disabled = false
 	sync_settings_btn.disabled = false
@@ -410,13 +297,6 @@ func set_connected(is_host: bool, connected_to_standalone: bool = false) -> void
 func set_disconnected() -> void:
 	host_btn.disabled = false
 	join_btn.disabled = false
-	webrtc_host_btn.disabled = false
-	webrtc_join_btn.disabled = false
-	webrtc_confirm_btn.disabled = false
-	webrtc_confirm_btn.text = "Confirm Connection Data"
-	webrtc_host_btn.text = "Host"
-	webrtc_join_btn.text = "Join"
-	webrtc_mode = 0
 	disconnect_btn.disabled = true
 	push_scene_btn.disabled = true
 	sync_settings_btn.disabled = true
@@ -425,8 +305,6 @@ func set_disconnected() -> void:
 	sync_status_btn.add_theme_color_override("font_color", Color.GRAY)
 
 	status_panel.hide()
-	update_webrtc_instructions("Click 'Host' or 'Join' to start.")
-	update_webrtc_text("")
 
 	status_label.text = "Status: Disconnected"
 	status_label.add_theme_color_override("font_color", Color.GRAY)
@@ -480,52 +358,6 @@ func _on_host_pressed() -> void:
 func _on_join_pressed() -> void:
 	if network:
 		network.join_server(ip_edit.text)
-
-func _on_webrtc_host_pressed() -> void:
-	if network:
-		if webrtc_mode == 1:
-			network.disconnect_peer()
-		else:
-			webrtc_mode = 1
-			webrtc_join_btn.disabled = true
-			webrtc_host_btn.text = "Cancel"
-			disconnect_btn.disabled = false
-			network.webrtc_host()
-
-func _on_webrtc_join_pressed() -> void:
-	if network:
-		if webrtc_mode == 2:
-			network.disconnect_peer()
-		else:
-			webrtc_mode = 2
-			webrtc_host_btn.disabled = true
-			webrtc_join_btn.text = "Cancel"
-			disconnect_btn.disabled = false
-			network.webrtc_join()
-
-func _on_webrtc_confirm_pressed() -> void:
-	if network:
-		network.webrtc_confirm(webrtc_text.text)
-
-func disable_webrtc_confirm() -> void:
-	if webrtc_confirm_btn:
-		webrtc_confirm_btn.disabled = true
-		webrtc_confirm_btn.text = "Confirming..."
-	update_webrtc_instructions("Processing connection data... Waiting for peer connection.")
-
-func enable_webrtc_confirm() -> void:
-	if webrtc_confirm_btn:
-		webrtc_confirm_btn.disabled = false
-		webrtc_confirm_btn.text = "Confirm Connection Data"
-
-
-func update_webrtc_instructions(text: String) -> void:
-	if webrtc_instructions:
-		webrtc_instructions.text = text
-
-func update_webrtc_text(text: String) -> void:
-	if webrtc_text:
-		webrtc_text.text = text
 
 func _on_disconnect_pressed() -> void:
 	if network:

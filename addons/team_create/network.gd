@@ -18,13 +18,6 @@ var _assigned_colors = []
 var file_sync
 var scene_sync
 
-# WebRTC
-var webrtc_peer: WebRTCMultiplayerPeer
-var webrtc_connection: WebRTCPeerConnection
-var is_webrtc = false
-var webrtc_candidates = []
-var local_sdp_type = ""
-var local_sdp = ""
 var _local_username = ""
 # Console thread
 var _console_thread: Thread
@@ -57,7 +50,6 @@ func _ready():
 		_console_thread = Thread.new()
 		_console_thread.start(Callable(self, "_server_console_thread_func"))
 
-	call_deferred("_init_editor_settings")
 	name = "TeamCreateNetwork"
 	# Load sync modules
 	var file_sync_script = load("res://addons/team_create/file_sync.gd")
@@ -200,15 +192,13 @@ func _process_console_command(input: String):
 
 	elif cmd == "/list":
 		tc_print_rich("[color=cyan]Connected users:[/color]")
-		if is_webrtc:
-			tc_print_rich("[color=gray] (IPs not available for WebRTC)[/color]")
 		var count = 0
 		for id in peers.keys():
 			if id == 1:
 				continue # Skip the server
 			var info = peers[id]
 			var ip_str = "N/A"
-			if not is_webrtc and multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+			if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
 				ip_str = multiplayer.multiplayer_peer.get_peer(id).get_remote_address()
 			tc_print_rich("[color=white]- " + info["username"] + " (ID: " + str(id) + ", IP: " + ip_str + ")[/color]")
 			count += 1
@@ -228,13 +218,13 @@ func _process_console_command(input: String):
 		tc_print_rich("[color=white]Peak Memory Usage:[/color] " + String.humanize_size(OS.get_static_memory_peak_usage()))
 		var cpu_usage = Performance.get_monitor(Performance.TIME_PROCESS) * Engine.get_frames_per_second() * 100.0
 		tc_print_rich("[color=white]CPU Usage:[/color] " + ("%.2f" % cpu_usage) + "%")
-		var port = str(PORT) if not is_webrtc else "WebRTC"
+		var port = str(PORT)
 		var local_ip = "127.0.0.1"
 		for address in IP.get_local_addresses():
 			if address.split(".").size() == 4 and not address.begins_with("127.") and not address.begins_with("169.254."):
 				local_ip = address
 				break
-		tc_print_rich("[color=white]Network:[/color] " + local_ip + ":" + str(port) if not is_webrtc else "[color=white]Network:[/color] WebRTC")
+		tc_print_rich("[color=white]Network:[/color] " + local_ip + ":" + str(port))
 		var user_count = peers.size() - 1 if peers.has(1) else peers.size()
 		tc_print_rich("[color=white]Total users connected:[/color] " + str(user_count))
 		tc_print_rich("[color=cyan]-------------------[/color]")
@@ -276,8 +266,6 @@ func kick_peer(id: int):
 	if is_server and id != 1:
 		if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
 			multiplayer.multiplayer_peer.disconnect_peer(id)
-		elif webrtc_peer:
-			webrtc_peer.remove_peer(id)
 		tc_print("Kicked peer ", id)
 
 func update_local_username(new_name: String):
@@ -303,15 +291,8 @@ func join_server(ip: String):
 	_add_peer(multiplayer.get_unique_id())
 
 func disconnect_peer():
-	if is_webrtc:
-		if webrtc_peer:
-			webrtc_peer.close()
-		webrtc_peer = null
-		webrtc_connection = null
-		is_webrtc = false
-	else:
-		if peer:
-			peer.close()
+	if peer:
+		peer.close()
 	if scene_sync:
 		scene_sync.clear_all_peer_indicators()
 	multiplayer.multiplayer_peer = null
@@ -449,7 +430,7 @@ func _update_ui_state():
 			connected_to_standalone = true
 		ui.set_connected(is_server, connected_to_standalone)
 		var username = get_username(multiplayer.get_unique_id())
-		var protocol = "WebRTC" if is_webrtc else ("Server" if connected_to_standalone else "LAN")
+		var protocol = "Server" if connected_to_standalone else "LAN"
 		ui.status_label.text = "Status: " + username + " Connected (" + protocol + ")"
 		ui.update_users_count(peers.size())
 
@@ -566,14 +547,6 @@ static func get_node_by_unique_id(root: Node, id: String) -> Node:
 		return root.get_node(id)
 	return null
 
-func _process(_delta: float) -> void:
-	if is_webrtc:
-		if webrtc_connection:
-			webrtc_connection.poll()
-		if webrtc_peer:
-			webrtc_peer.poll()
-
-
 func _get_random_color(rng: RandomNumberGenerator) -> Color:
 	return Color.from_hsv(rng.randf(), 0.8, 0.9)
 
@@ -627,296 +600,3 @@ func get_username(id: int) -> String:
 	return _get_default_peer_info(id)["username"]
 
 
-var downloading_webrtc = false
-
-func _download_webrtc():
-	if downloading_webrtc: return
-	downloading_webrtc = true
-	tc_print("Downloading WebRTC extension...")
-	if ui:
-		ui.webrtc_host_btn.text = "Downloading..."
-		ui.webrtc_join_btn.text = "Downloading..."
-		ui.webrtc_host_btn.disabled = true
-		ui.webrtc_join_btn.disabled = true
-
-	var http_request = HTTPRequest.new()
-	add_child(http_request)
-	http_request.request_completed.connect(self._on_webrtc_download_completed.bind(http_request))
-	var error = http_request.request("https://github.com/godotengine/webrtc-native/releases/download/1.1.0-stable/godot-extension-webrtc.zip")
-	if error != OK:
-		tc_print("Failed to start WebRTC download.")
-		downloading_webrtc = false
-
-func _on_webrtc_download_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, http_request: HTTPRequest):
-	if result == HTTPRequest.RESULT_SUCCESS and (response_code == 200 or response_code == 301 or response_code == 302):
-		var file = FileAccess.open("user://webrtc_update.zip", FileAccess.WRITE)
-		if file:
-			file.store_buffer(body)
-			file.close()
-			_extract_webrtc("user://webrtc_update.zip")
-		else:
-			tc_print("Failed to save WebRTC zip file.")
-			downloading_webrtc = false
-	else:
-		tc_print("Failed to download WebRTC. Response code: " + str(response_code))
-		downloading_webrtc = false
-	http_request.queue_free()
-
-# TODO: Add proper error handling/cleanup if ZIP extraction fails mid-way due to lack of disk space
-func _extract_webrtc(zip_path: String):
-	var zip_reader = ZIPReader.new()
-	var err = zip_reader.open(zip_path)
-	if err != OK:
-		tc_print("Failed to open WebRTC zip.")
-		DirAccess.remove_absolute(zip_path)
-		downloading_webrtc = false
-		return
-
-	var files = zip_reader.get_files()
-	for f in files:
-		if f.ends_with("/"):
-			continue
-
-		if ".." in f:
-			continue
-
-		var dest_path = "res://" + f
-		var dest_dir = dest_path.get_base_dir()
-		if not DirAccess.dir_exists_absolute(dest_dir):
-			DirAccess.make_dir_recursive_absolute(dest_dir)
-
-		var content = zip_reader.read_file(f)
-		var out_file = FileAccess.open(dest_path, FileAccess.WRITE)
-		if out_file:
-			out_file.store_buffer(content)
-			out_file.close()
-
-	zip_reader.close()
-	DirAccess.remove_absolute(zip_path)
-
-	# Prevent WebRTC folder from being built with the game
-	var ignore_file = FileAccess.open("res://webrtc/.gdignore", FileAccess.WRITE)
-	if ignore_file:
-		ignore_file.store_string("")
-		ignore_file.close()
-
-	tc_print("WebRTC extension installed! Restarting editor...")
-	if ui:
-		ui.webrtc_host_btn.text = "Restarting..."
-		ui.webrtc_join_btn.text = "Restarting..."
-
-	if plugin:
-		var editor_interface = plugin.get_editor_interface()
-		editor_interface.restart_editor()
-
-func webrtc_host():
-	webrtc_candidates.clear()
-
-	webrtc_connection = WebRTCPeerConnection.new()
-
-	# Check if the native extension is actually loaded. If not, Godot creates the base extension wrapper.
-	if webrtc_connection.get_class() == "WebRTCPeerConnectionExtension":
-		tc_print("WebRTC plugin missing or not loaded. Starting download...")
-		webrtc_connection = null
-		disconnect_peer()
-		_download_webrtc()
-		return
-
-	var err = webrtc_connection.initialize({
-		"iceServers": _get_stun_servers()
-	})
-
-	if err != OK:
-		tc_print("Failed to initialize WebRTC connection.")
-		webrtc_connection = null
-		disconnect_peer()
-		return
-
-	webrtc_peer = WebRTCMultiplayerPeer.new()
-	webrtc_peer.create_server()
-	multiplayer.multiplayer_peer = webrtc_peer
-	is_server = true
-	is_webrtc = true
-	_add_peer(1)
-
-	webrtc_connection.session_description_created.connect(_webrtc_offer_created)
-	webrtc_connection.ice_candidate_created.connect(_webrtc_ice_candidate_created)
-
-	webrtc_peer.add_peer(webrtc_connection, 2) # For manual 1-to-1 signaling
-
-	tc_print("Generating WebRTC offer...")
-	webrtc_connection.create_offer()
-
-	if ui:
-		ui.update_webrtc_instructions("Generating host offer...")
-		ui.update_webrtc_text("")
-
-func webrtc_join():
-	webrtc_candidates.clear()
-
-	webrtc_connection = WebRTCPeerConnection.new()
-
-	# Check if the native extension is actually loaded. If not, Godot creates the base extension wrapper.
-	if webrtc_connection.get_class() == "WebRTCPeerConnectionExtension":
-		tc_print("WebRTC plugin missing or not loaded. Starting download...")
-		webrtc_connection = null
-		disconnect_peer()
-		_download_webrtc()
-		return
-
-	var err = webrtc_connection.initialize({
-		"iceServers": _get_stun_servers()
-	})
-
-	if err != OK:
-		tc_print("Failed to initialize WebRTC connection.")
-		webrtc_connection = null
-		disconnect_peer()
-		return
-
-	webrtc_peer = WebRTCMultiplayerPeer.new()
-	webrtc_peer.create_client(2)
-	multiplayer.multiplayer_peer = webrtc_peer
-	is_server = false
-	is_webrtc = true
-	_add_peer(multiplayer.get_unique_id())
-
-	webrtc_connection.session_description_created.connect(_webrtc_offer_created)
-	webrtc_connection.ice_candidate_created.connect(_webrtc_ice_candidate_created)
-
-	tc_print("Initializing WebRTC join...")
-	webrtc_peer.add_peer(webrtc_connection, 1)
-
-	if ui:
-		ui.update_webrtc_instructions("Step 1: Paste Host Offer connection string below, then click Confirm.")
-		ui.update_webrtc_text("")
-
-func _webrtc_offer_created(type: String, sdp: String):
-	local_sdp_type = type
-	local_sdp = sdp
-	tc_print("WebRTC session description created: ", type)
-	tc_print("Waiting for ICE candidates...")
-	webrtc_connection.set_local_description(type, sdp)
-	call_deferred("_update_webrtc_output")
-
-func _webrtc_ice_candidate_created(media: String, index: int, name: String):
-	webrtc_candidates.append({"media": media, "index": index, "name": name})
-	call_deferred("_update_webrtc_output")
-
-func _update_webrtc_output():
-	if not webrtc_connection:
-		return
-	if local_sdp_type == "":
-		return
-
-	tc_print("Waiting 3 seconds for ICE candidates to gather...")
-	var timer = get_tree().create_timer(3.0)
-	await timer.timeout
-
-	if not webrtc_connection:
-		return
-
-	var dict = {
-		"type": local_sdp_type,
-		"sdp": local_sdp,
-		"candidates": webrtc_candidates
-	}
-	var json = JSON.stringify(dict)
-	var encoded_str = Marshalls.utf8_to_base64(json)
-	if ui:
-		if is_server:
-			ui.update_webrtc_instructions("Step 1: Copy this string and send it to your friend.\nStep 2: Wait for them to send their answer back.\nStep 3: Paste their answer below and click Confirm.")
-			ui.update_webrtc_text(encoded_str)
-		else:
-			ui.update_webrtc_instructions("Step 2: Copy this string and send it back to the host.")
-			ui.update_webrtc_text(encoded_str)
-
-func webrtc_confirm(encoded_str: String):
-	if is_server and not joins_enabled:
-		tc_print("Cannot process WebRTC connection because joins are disabled.")
-		return
-
-	tc_print("Parsing WebRTC connection string...")
-	if not is_webrtc or not webrtc_connection:
-		tc_print("WebRTC not initialized")
-		return
-
-	if ui:
-		ui.disable_webrtc_confirm()
-
-	var decoded_json_str = Marshalls.base64_to_utf8(encoded_str.strip_edges())
-
-	var json = JSON.new()
-	if json.parse(decoded_json_str) != OK:
-		tc_print("Failed to parse JSON")
-		if ui:
-			ui.update_webrtc_instructions("Error: Failed to parse connection data. Please make sure you copied the entire string correctly.")
-			ui.enable_webrtc_confirm()
-		return
-
-	var data = json.get_data()
-	if typeof(data) != TYPE_DICTIONARY:
-		tc_print("Invalid JSON data")
-		if ui:
-			ui.update_webrtc_instructions("Error: Invalid connection data format.")
-			ui.enable_webrtc_confirm()
-		return
-
-	if data.has("type") and data.has("sdp"):
-		tc_print("Applying remote WebRTC description (", data["type"], ")...")
-		webrtc_connection.set_remote_description(data["type"], data["sdp"])
-
-		# If we are client joining, and we just got the offer, it automatically creates an answer
-		if not is_server and data["type"] == "offer":
-			webrtc_candidates.clear() # Clear any old ones
-
-
-
-	if data.has("candidates"):
-		tc_print("Adding ICE candidates to remote connection...")
-		tc_print("Adding ", data["candidates"].size(), " ICE candidates...")
-		for cand in data["candidates"]:
-			if typeof(cand) == TYPE_DICTIONARY and cand.has("media") and cand.has("index") and cand.has("name"):
-				webrtc_connection.add_ice_candidate(cand["media"], cand["index"], cand["name"])
-			else:
-				tc_print("Invalid ICE candidate format.")
-
-func _init_editor_settings():
-	if Engine.is_editor_hint() and plugin and plugin.has_method("get_editor_interface"):
-		var editor_interface = plugin.get_editor_interface()
-		if editor_interface and editor_interface.has_method("get_editor_settings"):
-			var settings = editor_interface.get_editor_settings()
-			if settings:
-				var setting_name = "network/team_create/stun_server"
-				var default_val = "stun:stun.l.google.com:19302"
-				if not settings.has_setting(setting_name):
-					settings.set_setting(setting_name, default_val)
-				settings.set_initial_value(setting_name, default_val, false)
-				var property_info = {
-					"name": setting_name,
-					"type": TYPE_STRING,
-					"hint": PROPERTY_HINT_NONE,
-					"hint_string": "Comma separated list of STUN/TURN servers"
-				}
-				settings.add_property_info(property_info)
-
-func _get_stun_servers() -> Array:
-	var default_servers = [{"urls": ["stun:stun.l.google.com:19302"]}]
-
-	if Engine.is_editor_hint() and plugin and plugin.has_method("get_editor_interface"):
-		var editor_interface = plugin.get_editor_interface()
-		if editor_interface and editor_interface.has_method("get_editor_settings"):
-			var settings = editor_interface.get_editor_settings()
-			if settings and settings.has_setting("network/team_create/stun_server"):
-				var setting_val = settings.get_setting("network/team_create/stun_server")
-				if typeof(setting_val) == TYPE_STRING and setting_val.strip_edges() != "":
-					var server_list = []
-					var parts = setting_val.split(",")
-					for part in parts:
-						var url = part.strip_edges()
-						if url != "":
-							server_list.append(url)
-					if server_list.size() > 0:
-						return [{"urls": server_list}]
-
-	return default_servers

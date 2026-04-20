@@ -40,7 +40,7 @@ func _is_safe_path(p: String) -> bool:
 
 	var rel_path = "res://" + target.trim_prefix(base_res)
 
-	var blocked_dirs = ["addons/team_create", "webrtc"]
+	var blocked_dirs = ["addons/team_create"]
 	for d in blocked_dirs:
 		if rel_path == "res://" + d or rel_path.begins_with("res://" + d + "/"):
 			return false
@@ -156,7 +156,7 @@ func sync_all_files_to_peer(id: int):
 			file_hashes[path] = _get_cached_md5(path)
 		rpc_id(id, "compare_and_sync_files", file_hashes)
 
-func get_all_files(dir_path: String, exclude_dirs: Array = ["res://webrtc"]) -> Array:
+func get_all_files(dir_path: String, exclude_dirs: Array = []) -> Array:
 	var files = []
 	var dir = DirAccess.open(dir_path)
 	if dir:
@@ -295,20 +295,7 @@ func request_file(path: String):
 			return
 
 		# TODO: Abstract chunking logic into a reusable helper for large RPC data transfers
-		if network and network.is_webrtc:
-			var chunk_size = 60000
-			var offset = 0
-			var transfer_id = randi()
-			while offset < total_size:
-				var end_idx = min(offset + chunk_size, total_size)
-				var chunk = bytes.slice(offset, end_idx)
-				var is_final = (end_idx == total_size)
-				rpc_id(sender_id, "receive_file", path, transfer_id, chunk, is_final)
-				offset += chunk_size
-				if not is_final:
-					await get_tree().process_frame
-		else:
-			rpc_id(sender_id, "receive_file", path, randi(), bytes, true)
+		rpc_id(sender_id, "receive_file", path, randi(), bytes, true)
 	else:
 		rpc_id(sender_id, "receive_file", path, randi(), PackedByteArray(), true)
 
