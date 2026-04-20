@@ -278,14 +278,24 @@ func update_local_username(new_name: String):
 			rpc_id(1, "request_username_change", my_id, _local_username)
 
 func host_server():
-	peer.create_server(PORT, MAX_CLIENTS)
+	disconnect_peer()
+	var err = peer.create_server(PORT, MAX_CLIENTS)
+	if err != OK:
+		tc_print("Failed to host server: Error code ", err)
+		disconnect_peer()
+		return
 	multiplayer.multiplayer_peer = peer
 	is_server = true
 	_add_peer(1)
 	_update_ui_state()
 
 func join_server(ip: String):
-	peer.create_client(ip, PORT)
+	disconnect_peer()
+	var err = peer.create_client(ip, PORT)
+	if err != OK:
+		tc_print("Failed to join server: Error code ", err)
+		disconnect_peer()
+		return
 	multiplayer.multiplayer_peer = peer
 	is_server = false
 	_add_peer(multiplayer.get_unique_id())
