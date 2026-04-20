@@ -356,9 +356,8 @@ func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_fin
 				call_deferred("_update_sync_blocker")
 				if _pending_files_to_receive <= 0:
 					call_deferred("_hide_sync_blocker")
-					call_deferred("_hide_sync_blocker")
-				_known_files = get_all_files("res://")
-				sync_completed.emit()
+					_known_files = get_all_files("res://")
+					sync_completed.emit()
 
 			return
 		elif path in open_scenes:
