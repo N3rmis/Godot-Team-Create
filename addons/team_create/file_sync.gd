@@ -84,7 +84,10 @@ func _update_sync_blocker():
 	if _sync_blocker:
 		var label = _sync_blocker.get_node_or_null("SyncLabel")
 		if label:
-			label.text = "Syncing Files... (" + str(_pending_files_to_receive) + " remaining)"
+			var txt = "Syncing Files... (" + str(_pending_files_to_receive) + " remaining)"
+			if downloading_files.size() > 0:
+				txt += "\nWaiting for: " + downloading_files[0]
+			label.text = txt
 
 func _hide_sync_blocker():
 	if _sync_blocker:
