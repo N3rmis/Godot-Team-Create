@@ -48,6 +48,9 @@ func _is_safe_path(p: String) -> bool:
 	if rel_path == "res://project.godot":
 		return false
 
+	if rel_path.ends_with(".import") or rel_path.ends_with(".ctex") or rel_path.ends_with(".stex"):
+		return false
+
 	return true
 
 var _pending_files_to_receive = 0
@@ -165,6 +168,10 @@ func get_all_files(dir_path: String, exclude_dirs: Array = ["res://.godot", "res
 				if not exclude_dirs.has(sub_dir):
 					files.append_array(get_all_files(sub_dir, exclude_dirs))
 			elif not dir.current_is_dir() and not file_name.begins_with("."):
+				if file_name.ends_with(".import") or file_name.ends_with(".ctex") or file_name.ends_with(".stex"):
+					file_name = dir.get_next()
+					continue
+
 				# Convert local .tmp files to real assets instantly, as requested.
 				var full_path = dir_path.path_join(file_name)
 				if file_name.ends_with(".tmp"):
