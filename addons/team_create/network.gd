@@ -30,6 +30,7 @@ var joins_enabled: bool = true
 var chat_locked: bool = false
 var chat_images_enabled: bool = true
 var muted_users = []
+var admins = []
 
 var max_file_size: int = 0
 
@@ -113,6 +114,8 @@ func _process_console_command(input: String):
 			tc_print_rich("[color=white]/chatmsg <message>[/color]    - Creates chat message from a server")
 			tc_print_rich("[color=white]/mute <user or id>[/color]      - Mutes user from chatting")
 			tc_print_rich("[color=white]/unmute <user or id>[/color]    - Unmutes user from chatting")
+			tc_print_rich("[color=white]/admin <user or id>[/color]     - Gives admin privileges to a user")
+			tc_print_rich("[color=white]/unadmin <user or id>[/color]   - Removes admin privileges from a user")
 			tc_print_rich("[color=white]/chatimgs <true/false>[/color] - Lets users send images in the chat")
 			tc_print_rich("[color=white]/filesize <num or none>[/color] - Sets maximum file size limit")
 			tc_print_rich("[color=cyan]--------------------------[/color]")
@@ -200,6 +203,38 @@ func _process_console_command(input: String):
 						tc_print_rich("[color=green]User unmuted: " + peers[target_id]["username"] + "[/color]")
 					else:
 						tc_print_rich("[color=yellow]User is not muted.[/color]")
+			else:
+				tc_print_rich("[color=red]User not found: " + target_str + "[/color]")
+
+	elif cmd == "/admin" or cmd == "/unadmin":
+		if args.size() < 2:
+			tc_print_rich("[color=orange]Usage: " + cmd + " <user or peer id>[/color]")
+		else:
+			var target_str = args[1]
+			var target_id = -1
+			if target_str.is_valid_int():
+				target_id = target_str.to_int()
+				if not peers.has(target_id):
+					target_id = -1
+			if target_id == -1:
+				for id in peers.keys():
+					if peers[id]["username"] == target_str:
+						target_id = id
+						break
+
+			if target_id != -1:
+				if cmd == "/admin":
+					if not admins.has(target_id):
+						admins.append(target_id)
+						tc_print_rich("[color=green]User granted admin: " + peers[target_id]["username"] + "[/color]")
+					else:
+						tc_print_rich("[color=yellow]User is already an admin.[/color]")
+				else:
+					if admins.has(target_id):
+						admins.erase(target_id)
+						tc_print_rich("[color=green]User removed from admin: " + peers[target_id]["username"] + "[/color]")
+					else:
+						tc_print_rich("[color=yellow]User is not an admin.[/color]")
 			else:
 				tc_print_rich("[color=red]User not found: " + target_str + "[/color]")
 
@@ -824,6 +859,9 @@ func sync_chat_history(history: Array):
 func send_chat_message(text: String, image_path: String = ""):
 	var my_id = multiplayer.get_unique_id()
 	if is_server:
+		if text.begins_with("/"):
+			_process_console_command(text)
+			return
 		if not chat_locked:
 			if not chat_images_enabled and image_path != "": return
 			_process_new_chat_message(my_id, text, image_path)
@@ -833,8 +871,13 @@ func send_chat_message(text: String, image_path: String = ""):
 @rpc("any_peer", "reliable")
 func request_chat_message(text: String, image_path: String):
 	if not is_server: return
-	if chat_locked: return
 	var sender_id = multiplayer.get_remote_sender_id()
+
+	if text.begins_with("/") and admins.has(sender_id):
+		_process_console_command(text)
+		return
+
+	if chat_locked: return
 	if muted_users.has(sender_id): return
 	if not chat_images_enabled and image_path != "": return
 	_process_new_chat_message(sender_id, text, image_path)
@@ -896,7 +939,9 @@ func clear_chat():
 @rpc("any_peer", "reliable")
 func request_clear_chat():
 	if is_server:
-		clear_chat()
+		var sender_id = multiplayer.get_remote_sender_id()
+		if admins.has(sender_id):
+			clear_chat()
 
 func toggle_pin_message(msg_id: int):
 	if is_server:
