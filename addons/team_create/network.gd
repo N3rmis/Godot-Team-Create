@@ -31,6 +31,8 @@ var chat_locked: bool = false
 var chat_images_enabled: bool = true
 var muted_users = []
 
+var max_file_size: int = 0
+
 var chat_history = []
 var chat_id_counter = 0
 const CHAT_HISTORY_FILE = "res://team_chat_history.json"
@@ -112,6 +114,7 @@ func _process_console_command(input: String):
 			tc_print_rich("[color=white]/mute <user or id>[/color]      - Mutes user from chatting")
 			tc_print_rich("[color=white]/unmute <user or id>[/color]    - Unmutes user from chatting")
 			tc_print_rich("[color=white]/chatimgs <true/false>[/color] - Lets users send images in the chat")
+			tc_print_rich("[color=white]/filesize <num or none>[/color] - Sets maximum file size limit")
 			tc_print_rich("[color=cyan]--------------------------[/color]")
 		else:
 			tc_print_rich("[color=cyan]--- Available Commands (Page 1) ---[/color]")
@@ -198,6 +201,27 @@ func _process_console_command(input: String):
 						tc_print_rich("[color=yellow]User is not muted.[/color]")
 			else:
 				tc_print_rich("[color=red]User not found: " + target_str + "[/color]")
+
+	elif cmd == "/filesize":
+		if args.size() < 2:
+			tc_print_rich("[color=orange]Usage: /filesize <number (in Mb) or none>[/color]")
+		else:
+			var val = args[1].to_lower()
+			if val == "none":
+				max_file_size = 0
+				rpc("update_max_file_size", max_file_size)
+				tc_print_rich("[color=green]Max file size limit disabled (unlimited).[/color]")
+			elif val.is_valid_int() or val.is_valid_float():
+				var mb = val.to_float()
+				if mb <= 0:
+					tc_print_rich("[color=red]Invalid file size. Must be greater than 0 or none.[/color]")
+				else:
+					# Convert Mb to bytes
+					max_file_size = int(mb * 1024 * 1024)
+					rpc("update_max_file_size", max_file_size)
+					tc_print_rich("[color=green]Max file size set to " + val + " MB.[/color]")
+			else:
+				tc_print_rich("[color=red]Invalid argument. Use a number or none.[/color]")
 
 	elif cmd == "/chatimgs":
 		if args.size() < 2:
@@ -448,6 +472,9 @@ func _on_peer_connected(id: int):
 		# Auto sync all files when a peer joins
 		call_deferred("sync_all_files_to_peer", id)
 		# NOTE: We DO NOT push the scene here anymore! The client will request it when file sync finishes.
+		# Sync max file size to the new peer
+		rpc_id(id, "update_max_file_size", max_file_size)
+
 		# Send current peer list to the new peer
 		for existing_id in peers.keys():
 			rpc_id(id, "sync_peer_info", existing_id, peers[existing_id])
@@ -519,6 +546,12 @@ func sync_peer_info(id: int, info: Dictionary):
 		scene_sync._update_cursor_username(id, info["username"])
 	if ui:
 		ui.update_users_count(peers.size())
+
+@rpc("any_peer", "reliable")
+func update_max_file_size(size: int):
+	if multiplayer.get_remote_sender_id() != 1:
+		return
+	max_file_size = size
 
 @rpc("any_peer", "reliable")
 func show_message(msg: String):
