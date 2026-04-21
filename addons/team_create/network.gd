@@ -620,11 +620,11 @@ func show_popup(msg: String):
 
 	if plugin:
 		plugin.get_editor_interface().get_base_control().add_child(dialog)
-		dialog.popup_centered()
+		dialog.call_deferred("popup_centered")
 	else:
 		# Fallback if plugin reference is not available (e.g. headless)
 		get_tree().root.add_child(dialog)
-		dialog.popup_centered()
+		dialog.call_deferred("popup_centered")
 
 @rpc("any_peer", "reliable")
 func request_username_change(id: int, new_username: String):
