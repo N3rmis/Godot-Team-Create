@@ -357,20 +357,36 @@ func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_fin
 		var current_scene = ei.get_edited_scene_root()
 		var open_scenes = ei.get_open_scenes()
 
-		if current_scene and current_scene.scene_file_path == path:
-			network.tc_print("Team Create: Applying received file to active scene view.")
+		if path in open_scenes:
+			var is_active = current_scene and current_scene.scene_file_path == path
+			if is_active:
+				network.tc_print("Team Create: Applying received file to active scene view.")
+			else:
+				network.tc_print("Team Create: Applying received file to open background scene.")
+
 			if bytes.size() > 0:
 				var file = FileAccess.open(path, FileAccess.WRITE)
 				if file:
 					file.store_buffer(bytes)
 					file.close()
-			network.scene_sync._is_reloading_scene = true
-			network.scene_sync._force_full_sync_next_frame = true
+
+			if is_active:
+				network.scene_sync._is_reloading_scene = true
+				network.scene_sync._force_full_sync_next_frame = true
+
+			var prev_path = current_scene.scene_file_path if current_scene else ""
 			ei.reload_scene_from_path(path)
-			get_tree().create_timer(0.5).timeout.connect(func():
-				if is_instance_valid(network) and network.scene_sync:
-					network.scene_sync._is_reloading_scene = false
-			)
+
+			if not is_active and prev_path != "":
+				# reload_scene_from_path might change the active tab, so we switch back just in case
+				ei.open_scene_from_path(prev_path)
+
+			if is_active:
+				get_tree().create_timer(0.5).timeout.connect(func():
+					if is_instance_valid(network) and network.scene_sync:
+						network.scene_sync._is_reloading_scene = false
+				)
+
 			downloading_files.erase(path)
 			if _pending_files_to_receive > 0:
 				_pending_files_to_receive -= 1
@@ -381,16 +397,6 @@ func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_fin
 					sync_completed.emit()
 
 			return
-		elif path in open_scenes:
-			# Scene is open but NOT active ("closed" by the user's focus).
-			# We close the background scene in tabs.
-			var prev_path = current_scene.scene_file_path if current_scene else ""
-			ei.open_scene_from_path(path)
-			ei.close_scene()
-			if prev_path != "":
-				ei.open_scene_from_path(prev_path)
-			network.tc_print("Team Create: Closed background scene tab: ", path)
-			# We DO write the file below since it's no longer open.
 
 	# Ensure directory exists before writing
 	var dir_path = path.get_base_dir()
