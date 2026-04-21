@@ -482,6 +482,7 @@ func join_server(ip: String):
 	_add_peer(multiplayer.get_unique_id())
 
 func disconnect_peer():
+	var was_connected = multiplayer.multiplayer_peer != null
 	if peer:
 		peer.close()
 	if scene_sync:
@@ -494,7 +495,8 @@ func disconnect_peer():
 		ui.set_disconnected()
 	if file_sync:
 		file_sync._hide_sync_blocker()
-	tc_print("Disconnected")
+	if was_connected:
+		tc_print("Disconnected")
 
 func _add_peer(id: int):
 	if not peers.has(id):
