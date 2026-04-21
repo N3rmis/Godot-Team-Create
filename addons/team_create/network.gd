@@ -27,6 +27,9 @@ var _console_should_exit: bool = false
 var auto_save_prints_enabled: bool = false
 var timeprint_enabled: bool = true
 var joins_enabled: bool = true
+var chat_locked: bool = false
+var chat_images_enabled: bool = true
+var muted_users = []
 
 var chat_history = []
 var chat_id_counter = 0
@@ -102,22 +105,113 @@ func _process_console_command(input: String):
 	var cmd = args[0].to_lower()
 
 	if cmd == "/help":
-		tc_print_rich("[color=cyan]--- Available Commands ---[/color]")
-		tc_print_rich("[color=white]/kick <user>[/color]   - Kicks a user from the server")
-		tc_print_rich("[color=white]/list[/color]          - Lists all connected users")
-		tc_print_rich("[color=white]/info[/color]          - Shows server statistics (memory, CPU, players, etc.)")
-		tc_print_rich("[color=white]/update[/color]        - Downloads latest update and restarts the server")
-		tc_print_rich("[color=white]/restart[/color]       - Restarts the server")
-		tc_print_rich("[color=white]/stop[/color]          - Stops and exits the server")
-		tc_print_rich("[color=white]/saveprints <true/false>[/color] - Toggles auto-save prints")
-		tc_print_rich("[color=white]/timeprint <true/false>[/color] - Toggles time prefix in prints")
-		tc_print_rich("[color=white]/togglejoins <true/false>[/color] - Toggles people joining the server")
-		tc_print_rich("[color=white]/msg <message>[/color]    - Shows a message to everyone")
-		tc_print_rich("[color=white]/clearchat[/color]       - Clears all chat messages")
-		tc_print_rich("[color=cyan]--------------------------[/color]")
+		if args.size() > 1 and args[1] == "2":
+			tc_print_rich("[color=cyan]--- Available Commands (Page 2) ---[/color]")
+			tc_print_rich("[color=white]/lockchat <true/false>[/color] - Prevents users from chatting")
+			tc_print_rich("[color=white]/chatmsg <message>[/color]    - Creates chat message from a server")
+			tc_print_rich("[color=white]/mute <user or id>[/color]      - Mutes user from chatting")
+			tc_print_rich("[color=white]/unmute <user or id>[/color]    - Unmutes user from chatting")
+			tc_print_rich("[color=white]/chatimgs <true/false>[/color] - Lets users send images in the chat")
+			tc_print_rich("[color=cyan]--------------------------[/color]")
+		else:
+			tc_print_rich("[color=cyan]--- Available Commands (Page 1) ---[/color]")
+			tc_print_rich("[color=white]/kick <user>[/color]   - Kicks a user from the server")
+			tc_print_rich("[color=white]/list[/color]          - Lists all connected users")
+			tc_print_rich("[color=white]/info[/color]          - Shows server statistics (memory, CPU, players, etc.)")
+			tc_print_rich("[color=white]/update[/color]        - Downloads latest update and restarts the server")
+			tc_print_rich("[color=white]/restart[/color]       - Restarts the server")
+			tc_print_rich("[color=white]/stop[/color]          - Stops and exits the server")
+			tc_print_rich("[color=white]/saveprints <true/false>[/color] - Toggles auto-save prints")
+			tc_print_rich("[color=white]/timeprint <true/false>[/color] - Toggles time prefix in prints")
+			tc_print_rich("[color=white]/togglejoins <true/false>[/color] - Toggles people joining the server")
+			tc_print_rich("[color=white]/msg <message>[/color]    - Shows a message to everyone")
+			tc_print_rich("[color=white]/clearchat[/color]       - Clears all chat messages")
+			tc_print_rich("[color=cyan]Type /help 2 for more commands[/color]")
+			tc_print_rich("[color=cyan]--------------------------[/color]")
 
 	elif cmd == "/clearchat":
 		clear_chat()
+
+	elif cmd == "/lockchat":
+		if args.size() < 2:
+			tc_print_rich("[color=orange]Usage: /lockchat <true/false>[/color]")
+		else:
+			var val = args[1].to_lower()
+			if val == "true":
+				chat_locked = true
+				tc_print_rich("[color=green]Chat is now locked.[/color]")
+			elif val == "false":
+				chat_locked = false
+				tc_print_rich("[color=green]Chat is now unlocked.[/color]")
+			else:
+				tc_print_rich("[color=red]Invalid argument. Use true or false.[/color]")
+
+	elif cmd == "/chatmsg":
+		if args.size() < 2:
+			tc_print_rich("[color=orange]Usage: /chatmsg <message>[/color]")
+		else:
+			var msg_text = input.substr(args[0].length()).strip_edges()
+			var msg = {
+				"id": chat_id_counter,
+				"type": "text",
+				"sender_id": 1,
+				"sender_name": "Server",
+				"sender_color": "FFA500",
+				"pinned": false,
+				"text": "[color=#FFA500]" + msg_text + "[/color]"
+			}
+			chat_id_counter += 1
+			chat_history.append(msg)
+			_save_chat_history()
+			rpc("receive_chat_message", msg)
+			_add_message_to_local_ui(msg)
+			tc_print("[Chat] Server: " + msg_text)
+
+	elif cmd == "/mute" or cmd == "/unmute":
+		if args.size() < 2:
+			tc_print_rich("[color=orange]Usage: " + cmd + " <user or peer id>[/color]")
+		else:
+			var target_str = args[1]
+			var target_id = -1
+			if target_str.is_valid_int():
+				target_id = target_str.to_int()
+				if not peers.has(target_id):
+					target_id = -1
+			if target_id == -1:
+				for id in peers.keys():
+					if peers[id]["username"] == target_str:
+						target_id = id
+						break
+
+			if target_id != -1:
+				if cmd == "/mute":
+					if not muted_users.has(target_id):
+						muted_users.append(target_id)
+						tc_print_rich("[color=yellow]User muted: " + peers[target_id]["username"] + "[/color]")
+					else:
+						tc_print_rich("[color=yellow]User is already muted.[/color]")
+				else:
+					if muted_users.has(target_id):
+						muted_users.erase(target_id)
+						tc_print_rich("[color=green]User unmuted: " + peers[target_id]["username"] + "[/color]")
+					else:
+						tc_print_rich("[color=yellow]User is not muted.[/color]")
+			else:
+				tc_print_rich("[color=red]User not found: " + target_str + "[/color]")
+
+	elif cmd == "/chatimgs":
+		if args.size() < 2:
+			tc_print_rich("[color=orange]Usage: /chatimgs <true/false>[/color]")
+		else:
+			var val = args[1].to_lower()
+			if val == "true":
+				chat_images_enabled = true
+				tc_print_rich("[color=green]Chat images enabled.[/color]")
+			elif val == "false":
+				chat_images_enabled = false
+				tc_print_rich("[color=green]Chat images disabled.[/color]")
+			else:
+				tc_print_rich("[color=red]Invalid argument. Use true or false.[/color]")
 
 	elif cmd == "/saveprints":
 		if args.size() < 2:
@@ -668,14 +762,19 @@ func sync_chat_history(history: Array):
 func send_chat_message(text: String, image_path: String = ""):
 	var my_id = multiplayer.get_unique_id()
 	if is_server:
-		_process_new_chat_message(my_id, text, image_path)
+		if not chat_locked:
+			if not chat_images_enabled and image_path != "": return
+			_process_new_chat_message(my_id, text, image_path)
 	else:
 		rpc_id(1, "request_chat_message", text, image_path)
 
 @rpc("any_peer", "reliable")
 func request_chat_message(text: String, image_path: String):
 	if not is_server: return
+	if chat_locked: return
 	var sender_id = multiplayer.get_remote_sender_id()
+	if muted_users.has(sender_id): return
+	if not chat_images_enabled and image_path != "": return
 	_process_new_chat_message(sender_id, text, image_path)
 
 func _process_new_chat_message(sender_id: int, text: String, image_path: String):
