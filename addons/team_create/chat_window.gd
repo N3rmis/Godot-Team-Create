@@ -36,7 +36,8 @@ func _init():
 
 	var drop_target = DropTarget.new()
 	drop_target.chat_window = self
-	drop_target.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	drop_target.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	drop_target.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	drop_target.add_theme_constant_override("margin_left", 8)
 	drop_target.add_theme_constant_override("margin_right", 8)
 	drop_target.add_theme_constant_override("margin_top", 8)
@@ -68,15 +69,9 @@ func _init():
 	main_vbox.add_child(sep1)
 
 	# Pinned messages container
-	var pinned_scroll = ScrollContainer.new()
-	pinned_scroll.custom_minimum_size = Vector2(0, 0)
-	pinned_scroll.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	pinned_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	main_vbox.add_child(pinned_scroll)
-
 	pinned_vbox = VBoxContainer.new()
 	pinned_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	pinned_scroll.add_child(pinned_vbox)
+	main_vbox.add_child(pinned_vbox)
 
 
 	var sep2 = HSeparator.new()

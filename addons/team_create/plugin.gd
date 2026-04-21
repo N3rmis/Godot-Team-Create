@@ -2,6 +2,7 @@
 extends EditorPlugin
 
 var dock: Control
+var chat_dock: Control
 var network: Node
 
 func _enter_tree() -> void:
@@ -15,7 +16,9 @@ func _enter_tree() -> void:
 		download_update()
 		return
 
+	var chat_script = load("res://addons/team_create/chat_window.gd")
 	dock = ui_script.new()
+	chat_dock = chat_script.new()
 
 	# Load network manager script and instantiate it as a child.
 	network = network_script.new()
@@ -25,9 +28,13 @@ func _enter_tree() -> void:
 	dock.network = network
 	network.ui = dock
 
+	chat_dock.network = network
+	network.chat_window = chat_dock
+
 	network.plugin = self
 
 	add_control_to_dock(DOCK_SLOT_LEFT_UR, dock)
+	add_control_to_bottom_panel(chat_dock, "Team Chat")
 	get_tree().root.add_child(network)
 
 	network.tc_print("Team Create initialized.")
@@ -38,6 +45,8 @@ func _enter_tree() -> void:
 func _exit_tree() -> void:
 	if dock:
 		remove_control_from_docks(dock)
+		remove_control_from_bottom_panel(chat_dock)
+		chat_dock.queue_free()
 		dock.queue_free()
 	if network:
 		get_tree().root.remove_child(network)
