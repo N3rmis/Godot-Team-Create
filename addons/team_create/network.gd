@@ -128,6 +128,7 @@ func _process_console_command(input: String):
 			tc_print_rich("[color=white]/timeprint <true/false>[/color] - Toggles time prefix in prints")
 			tc_print_rich("[color=white]/togglejoins <true/false>[/color] - Toggles people joining the server")
 			tc_print_rich("[color=white]/msg <message>[/color]    - Shows a message to everyone")
+			tc_print_rich("[color=white]/popup <message>[/color]  - Creates a pop up for everyone")
 			tc_print_rich("[color=white]/clearchat[/color]       - Clears all chat messages")
 			tc_print_rich("[color=cyan]Type /help 2 for more commands[/color]")
 			tc_print_rich("[color=cyan]--------------------------[/color]")
@@ -291,6 +292,15 @@ func _process_console_command(input: String):
 			rpc("show_message", msg)
 			show_message(msg)
 			tc_print_rich("[color=green]Message sent: " + msg + "[/color]")
+
+	elif cmd == "/popup":
+		if args.size() < 2:
+			tc_print_rich("[color=orange]Usage: /popup <message>[/color]")
+		else:
+			var msg = input.substr(args[0].length()).strip_edges()
+			rpc("show_popup", msg)
+			show_popup(msg)
+			tc_print_rich("[color=green]Popup sent: " + msg + "[/color]")
 
 	elif cmd == "/kick":
 		if args.size() < 2:
@@ -559,6 +569,25 @@ func show_message(msg: String):
 		return
 	if ui and ui.has_method("show_server_message"):
 		ui.show_server_message(msg)
+
+@rpc("authority", "call_remote", "reliable")
+func show_popup(msg: String):
+	if multiplayer.get_remote_sender_id() != 1 and multiplayer.get_remote_sender_id() != 0:
+		return
+
+	var dialog = AcceptDialog.new()
+	dialog.title = "Server Message"
+	dialog.dialog_text = msg
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
+
+	if plugin:
+		plugin.get_editor_interface().get_base_control().add_child(dialog)
+		dialog.popup_centered()
+	else:
+		# Fallback if plugin reference is not available (e.g. headless)
+		get_tree().root.add_child(dialog)
+		dialog.popup_centered()
 
 @rpc("any_peer", "reliable")
 func request_username_change(id: int, new_username: String):
