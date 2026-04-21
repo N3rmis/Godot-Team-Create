@@ -36,7 +36,7 @@ var max_file_size: int = 0
 
 var chat_history = []
 var chat_id_counter = 0
-const CHAT_HISTORY_FILE = "res://team_chat_history.json"
+const CHAT_HISTORY_FILE = "res://addons/team_create/team_chat_history.json"
 
 
 func tc_print(msg: String, arg1="", arg2="", arg3=""):
