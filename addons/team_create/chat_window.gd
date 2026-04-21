@@ -113,12 +113,8 @@ func _on_input_submitted(text: String):
 func _on_send_pressed():
 	var text = input_edit.text.strip_edges()
 	if text != "":
-		if text == "/clearchat":
-			if network:
-				network.clear_chat()
-		else:
-			if network:
-				network.send_chat_message(text, "")
+		if network:
+			network.send_chat_message(text, "")
 		input_edit.text = ""
 
 func _on_scroll_changed(value: float):
