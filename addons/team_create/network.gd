@@ -415,7 +415,12 @@ func _deferred_restart():
 	_save_chat_history()
 
 	var exec_path = OS.get_executable_path()
-	var args = OS.get_cmdline_args()
+	var args = []
+	if DisplayServer.get_name() == "headless":
+		args.append("--headless")
+
+	for arg in OS.get_cmdline_args():
+		args.append(arg)
 
 	if OS.has_method("set_restart_on_exit"):
 		OS.set_restart_on_exit(true, args)
