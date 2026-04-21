@@ -16,20 +16,21 @@ func _enter_tree() -> void:
 		return
 
 	dock = ui_script.new()
-	add_control_to_dock(DOCK_SLOT_LEFT_UR, dock)
 
 	# Load network manager script and instantiate it as a child.
 	network = network_script.new()
 	network.name = "TeamCreateNetwork"
-	get_tree().root.add_child(network)
-
-	network.tc_print("Team Create initialized.")
 
 	# Link UI and network
 	dock.network = network
 	network.ui = dock
 
 	network.plugin = self
+
+	add_control_to_dock(DOCK_SLOT_LEFT_UR, dock)
+	get_tree().root.add_child(network)
+
+	network.tc_print("Team Create initialized.")
 
 	# Check for updates on load
 	check_for_updates()
