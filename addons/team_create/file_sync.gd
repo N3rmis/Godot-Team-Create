@@ -116,6 +116,27 @@ func _on_filesystem_changed():
 	for path in keys_to_remove:
 		_file_hash_cache.erase(path)
 
+	# Check for local files that exceed max_file_size
+	if network and network.max_file_size > 0:
+		var current_files = get_all_files("res://")
+		var removed_any = false
+		for path in current_files:
+			if not _known_files.has(path) and FileAccess.file_exists(path):
+				var f = FileAccess.open(path, FileAccess.READ)
+				if f:
+					var size = f.get_length()
+					f.close()
+					if size > network.max_file_size:
+						DirAccess.remove_absolute(path)
+						network.tc_print_rich("[color=red]Warning: File " + path + " is too large (max " + str(network.max_file_size / (1024 * 1024.0)) + " MB). It was deleted and not synced.[/color]")
+						if _file_hash_cache.has(path):
+							_file_hash_cache.erase(path)
+						removed_any = true
+		if removed_any:
+			# Scan again so editor notices deleted files
+			if network.plugin and network.plugin.get_editor_interface().get_resource_filesystem():
+				network.plugin.get_editor_interface().get_resource_filesystem().scan()
+
 	# Automatically sync files whenever Godot detects a local file system change.
 	sync_all_files()
 
