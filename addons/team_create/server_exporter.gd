@@ -332,7 +332,6 @@ static func export_server(target_dir: String, caller_ui: Control) -> void:
 		tscn_file.close()
 
 	var proj_path = temp_project_dir + "/project.godot"
-	var preset_path = temp_project_dir + "/export_presets.cfg"
 
 	# Modify Project file to include our feature tag main scene override
 	var f_proj_append = FileAccess.open(proj_path, FileAccess.READ_WRITE)
@@ -345,7 +344,7 @@ static func export_server(target_dir: String, caller_ui: Control) -> void:
 	# 1. ALWAYS clone temp_project_dir to target_dir/project
 	print("Bundling project directory...")
 	var target_project_dir = target_dir + "/project"
-	copy_dir_recursive(temp_project_dir, target_project_dir, [temp_project_dir + "/export_presets.cfg"])
+	copy_dir_recursive(temp_project_dir, target_project_dir, [])
 
 	# Patch target project.godot to make server.tscn the default main scene directly
 	var t_proj = FileAccess.open(target_project_dir + "/project.godot", FileAccess.READ_WRITE)

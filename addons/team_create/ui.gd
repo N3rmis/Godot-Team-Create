@@ -244,7 +244,7 @@ func _init() -> void:
 
 	export_btn = Button.new()
 	export_btn.text = "Export Headless Server"
-	export_btn.tooltip_text = "Generate a standalone server build/scripts to host without the Godot editor."
+	export_btn.tooltip_text = "Generate standalone server scripts to host without the Godot editor."
 	export_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	export_btn.pressed.connect(_on_export_pressed)
 	sync_vbox.add_child(export_btn)
