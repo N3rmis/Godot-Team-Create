@@ -26,6 +26,9 @@ var export_dialog: FileDialog
 var lan_container: VBoxContainer
 var sync_status_btn: Button
 
+var chat_btn: Button
+var chat_window: Window
+
 
 func _init() -> void:
 	name = "Sync Dashboard"
@@ -248,6 +251,20 @@ func _init() -> void:
 
 	main_vbox.add_child(HSeparator.new())
 
+	chat_btn = Button.new()
+	chat_btn.text = "Open Chat"
+	chat_btn.tooltip_text = "Open the team chat window."
+	chat_btn.disabled = true
+	chat_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	chat_btn.pressed.connect(_on_chat_pressed)
+	main_vbox.add_child(chat_btn)
+
+	var chat_script = load("res://addons/team_create/chat_window.gd")
+	if chat_script:
+		chat_window = chat_script.new()
+		chat_window.network = network # Will be null at this point, set in _ready instead or from plugin
+		add_child(chat_window)
+
 	update_btn = Button.new()
 	update_btn.text = "Check for Updates"
 	update_btn.tooltip_text = "Check GitHub for newer versions of the Godot Team Create plugin."
@@ -264,6 +281,9 @@ func _init() -> void:
 
 
 func _ready() -> void:
+	if chat_window:
+		chat_window.network = network
+
 	if network and network.plugin:
 		var settings = network.plugin.get_editor_interface().get_editor_settings()
 		if settings.has_setting("team_create/username"):
@@ -279,6 +299,7 @@ func set_connected(is_host: bool, connected_to_standalone: bool = false) -> void
 	push_scene_btn.disabled = false
 	sync_settings_btn.disabled = false
 	sync_files_btn.disabled = false
+	chat_btn.disabled = false
 	sync_status_btn.text = "✓ Up to date!"
 	sync_status_btn.add_theme_color_override("font_color", Color.LIGHT_GREEN)
 
@@ -301,6 +322,7 @@ func set_disconnected() -> void:
 	push_scene_btn.disabled = true
 	sync_settings_btn.disabled = true
 	sync_files_btn.disabled = true
+	chat_btn.disabled = true
 	sync_status_btn.text = "Not connected"
 	sync_status_btn.add_theme_color_override("font_color", Color.GRAY)
 
@@ -397,3 +419,7 @@ func _on_export_dir_selected(dir: String) -> void:
 			exporter_script.export_server(dir, self)
 		else:
 			network.tc_print("Failed to load server_exporter.gd")
+
+func _on_chat_pressed() -> void:
+	if chat_window:
+		chat_window.popup_centered()

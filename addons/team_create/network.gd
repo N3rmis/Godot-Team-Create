@@ -28,6 +28,10 @@ var auto_save_prints_enabled: bool = false
 var timeprint_enabled: bool = true
 var joins_enabled: bool = true
 
+var chat_history = []
+var chat_id_counter = 0
+const CHAT_HISTORY_FILE = "res://team_chat_history.json"
+
 
 func tc_print(msg: String, arg1="", arg2="", arg3=""):
 	var full_msg = msg + str(arg1) + str(arg2) + str(arg3)
@@ -49,6 +53,8 @@ func _ready():
 	if is_standalone_server:
 		_console_thread = Thread.new()
 		_console_thread.start(Callable(self, "_server_console_thread_func"))
+
+	_load_chat_history()
 
 	name = "TeamCreateNetwork"
 	# Load sync modules
@@ -107,7 +113,11 @@ func _process_console_command(input: String):
 		tc_print_rich("[color=white]/timeprint <true/false>[/color] - Toggles time prefix in prints")
 		tc_print_rich("[color=white]/togglejoins <true/false>[/color] - Toggles people joining the server")
 		tc_print_rich("[color=white]/msg <message>[/color]    - Shows a message to everyone")
+		tc_print_rich("[color=white]/clearchat[/color]       - Clears all chat messages")
 		tc_print_rich("[color=cyan]--------------------------[/color]")
+
+	elif cmd == "/clearchat":
+		clear_chat()
 
 	elif cmd == "/saveprints":
 		if args.size() < 2:
@@ -239,6 +249,7 @@ func _deferred_update_and_restart():
 func _deferred_restart():
 	# Clean up network connections before restarting
 	disconnect_peer()
+	_save_chat_history()
 
 	var exec_path = OS.get_executable_path()
 	var args = OS.get_cmdline_args()
@@ -256,6 +267,7 @@ func _deferred_restart():
 
 func _deferred_stop():
 	disconnect_peer()
+	_save_chat_history()
 
 	if _console_thread and _console_thread.is_started():
 		_console_should_exit = true
@@ -287,6 +299,7 @@ func host_server():
 	multiplayer.multiplayer_peer = peer
 	is_server = true
 	_add_peer(1)
+	call_deferred("_update_local_chat_ui")
 	_update_ui_state()
 
 func join_server(ip: String):
@@ -349,6 +362,10 @@ func _on_peer_connected(id: int):
 		for peer_id in peers.keys():
 			if peer_id != 1 and peer_id != id:
 				rpc_id(peer_id, "sync_peer_info", id, peers[id])
+
+		# Send chat history to the new user
+		rpc_id(id, "sync_chat_history", chat_history)
+		broadcast_join_message(id)
 
 
 
@@ -610,3 +627,147 @@ func get_username(id: int) -> String:
 	return _get_default_peer_info(id)["username"]
 
 
+
+
+# Chat System
+func _load_chat_history():
+	if FileAccess.file_exists(CHAT_HISTORY_FILE):
+		var file = FileAccess.open(CHAT_HISTORY_FILE, FileAccess.READ)
+		if file:
+			var text_content = file.get_as_text()
+			file.close()
+			var json = JSON.new()
+			if json.parse(text_content) == OK:
+				if typeof(json.data) == TYPE_ARRAY:
+					chat_history = json.data
+					# find highest id
+					for m in chat_history:
+						if m.has("id") and m["id"] >= chat_id_counter:
+							chat_id_counter = int(m["id"]) + 1
+
+func _save_chat_history():
+	var file = FileAccess.open(CHAT_HISTORY_FILE, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(chat_history))
+		file.close()
+
+func _update_local_chat_ui():
+	if ui and ui.chat_window:
+		ui.chat_window.set_messages(chat_history)
+
+func _add_message_to_local_ui(msg: Dictionary):
+	if ui and ui.chat_window:
+		ui.chat_window.add_message(msg)
+
+@rpc("any_peer", "reliable")
+func sync_chat_history(history: Array):
+	if multiplayer.get_remote_sender_id() != 1: return
+	chat_history = history
+	_update_local_chat_ui()
+
+func send_chat_message(text: String, image_path: String = ""):
+	var my_id = multiplayer.get_unique_id()
+	if is_server:
+		_process_new_chat_message(my_id, text, image_path)
+	else:
+		rpc_id(1, "request_chat_message", text, image_path)
+
+@rpc("any_peer", "reliable")
+func request_chat_message(text: String, image_path: String):
+	if not is_server: return
+	var sender_id = multiplayer.get_remote_sender_id()
+	_process_new_chat_message(sender_id, text, image_path)
+
+func _process_new_chat_message(sender_id: int, text: String, image_path: String):
+	var username = get_username(sender_id)
+	var color = get_user_color(sender_id)
+
+	var msg = {
+		"id": chat_id_counter,
+		"type": "text",
+		"sender_id": sender_id,
+		"sender_name": username,
+		"sender_color": color.to_html(false),
+		"pinned": false
+	}
+	chat_id_counter += 1
+
+	if image_path != "":
+		msg["type"] = "image"
+		# If they drag from local filesystem and its outside res://, we would need to transfer it
+		# For now we assume they drag from inside the project, or we just take the path.
+		msg["path"] = image_path
+		tc_print("[Chat] " + username + " sent an image: " + image_path)
+	else:
+		msg["text"] = text
+		tc_print("[Chat] " + username + ": " + text)
+
+	chat_history.append(msg)
+	_save_chat_history()
+
+	# Send to all peers
+	rpc("receive_chat_message", msg)
+	# Local server gets it too
+	_add_message_to_local_ui(msg)
+
+@rpc("any_peer", "reliable")
+func receive_chat_message(msg: Dictionary):
+	var sender_id = multiplayer.get_remote_sender_id()
+	# If we're not the server, only accept from server. (0 means local call)
+	if not is_server and sender_id != 1 and sender_id != 0: return
+
+	# Client-side: if we didn't add it ourselves (we aren't server), append it
+	if not is_server:
+		chat_history.append(msg)
+
+	_add_message_to_local_ui(msg)
+
+func clear_chat():
+	if is_server:
+		chat_history.clear()
+		_save_chat_history()
+		rpc("sync_chat_history", [])
+		_update_local_chat_ui()
+		tc_print("Chat history cleared.")
+	else:
+		rpc_id(1, "request_clear_chat")
+
+@rpc("any_peer", "reliable")
+func request_clear_chat():
+	if is_server:
+		clear_chat()
+
+func toggle_pin_message(msg_id: int):
+	if is_server:
+		_process_toggle_pin(msg_id)
+	else:
+		rpc_id(1, "request_toggle_pin", msg_id)
+
+@rpc("any_peer", "reliable")
+func request_toggle_pin(msg_id: int):
+	if is_server:
+		_process_toggle_pin(msg_id)
+
+func _process_toggle_pin(msg_id: int):
+	for m in chat_history:
+		if m.has("id") and m["id"] == msg_id:
+			m["pinned"] = not m.get("pinned", false)
+			_save_chat_history()
+			rpc("sync_chat_history", chat_history)
+			_update_local_chat_ui()
+			break
+
+func broadcast_join_message(id: int):
+	if not joins_enabled: return
+	var username = get_username(id)
+	var msg = {
+		"id": chat_id_counter,
+		"type": "join",
+		"text": username + " joined the session",
+		"pinned": false
+	}
+	chat_id_counter += 1
+	chat_history.append(msg)
+	_save_chat_history()
+	rpc("receive_chat_message", msg)
+	receive_chat_message(msg)
