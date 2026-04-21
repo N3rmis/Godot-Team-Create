@@ -20,6 +20,7 @@ var scene_sync
 
 var _local_username = ""
 # Console thread
+var chat_window: Control
 var _console_thread: Thread
 var _console_should_exit: bool = false
 
@@ -856,12 +857,12 @@ func _save_chat_history():
 		file.close()
 
 func _update_local_chat_ui():
-	if ui and ui.chat_window:
-		ui.chat_window.set_messages(chat_history)
+	if chat_window:
+		chat_window.set_messages(chat_history)
 
 func _add_message_to_local_ui(msg: Dictionary):
-	if ui and ui.chat_window:
-		ui.chat_window.add_message(msg)
+	if chat_window:
+		chat_window.add_message(msg)
 
 @rpc("any_peer", "reliable")
 func sync_chat_history(history: Array):
@@ -870,6 +871,14 @@ func sync_chat_history(history: Array):
 	_update_local_chat_ui()
 
 func send_chat_message(text: String, image_path: String = ""):
+	if multiplayer.multiplayer_peer == null:
+		tc_print("Cannot send message. Not connected to a server.")
+		return
+	var peer_status = multiplayer.multiplayer_peer.get_connection_status()
+	if peer_status == MultiplayerPeer.CONNECTION_DISCONNECTED:
+		tc_print("Cannot send message. Not connected to a server.")
+		return
+
 	var my_id = multiplayer.get_unique_id()
 	if is_server:
 		if text.begins_with("/"):
@@ -879,6 +888,9 @@ func send_chat_message(text: String, image_path: String = ""):
 			if not chat_images_enabled and image_path != "": return
 			_process_new_chat_message(my_id, text, image_path)
 	else:
+		if my_id == 1 or my_id == 0:
+			tc_print("Cannot send message. Not connected to a server.")
+			return
 		rpc_id(1, "request_chat_message", text, image_path)
 
 @rpc("any_peer", "reliable")

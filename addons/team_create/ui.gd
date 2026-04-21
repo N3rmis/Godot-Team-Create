@@ -26,7 +26,6 @@ var export_dialog: FileDialog
 var lan_container: VBoxContainer
 var sync_status_btn: Button
 
-var chat_window: VBoxContainer
 
 
 func _init() -> void:
@@ -250,17 +249,6 @@ func _init() -> void:
 
 	main_vbox.add_child(HSeparator.new())
 
-	var chat_panel = PanelContainer.new()
-	chat_panel.add_theme_stylebox_override("panel", panel_style)
-	chat_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	main_vbox.add_child(chat_panel)
-
-	var chat_script = load("res://addons/team_create/chat_window.gd")
-	if chat_script:
-		chat_window = chat_script.new()
-		chat_window.network = network # Will be null at this point, set in _ready instead or from plugin
-		chat_panel.add_child(chat_window)
-
 	update_btn = Button.new()
 	update_btn.text = "Check for Updates"
 	update_btn.tooltip_text = "Check GitHub for newer versions of the Godot Team Create plugin."
@@ -277,9 +265,6 @@ func _init() -> void:
 
 
 func _ready() -> void:
-	if chat_window:
-		chat_window.network = network
-
 	if network and network.plugin:
 		var settings = network.plugin.get_editor_interface().get_editor_settings()
 		if settings.has_setting("team_create/username"):
