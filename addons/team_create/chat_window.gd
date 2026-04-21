@@ -1,10 +1,10 @@
 @tool
-extends Window
+extends VBoxContainer
 
 var network: Node
 
 class DropTarget extends MarginContainer:
-	var chat_window: Window
+	var chat_window: VBoxContainer
 
 	func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
 		if typeof(data) == TYPE_DICTIONARY and data.has("type") and data["type"] == "files":
@@ -31,14 +31,8 @@ var messages_data = [] # Array of dictionaries
 var current_display_count = 20
 
 func _init():
-	title = "Team Chat"
-
 	# Try to find a global network instance if possible or assign later
-	size = Vector2(400, 500)
-	min_size = Vector2(300, 300)
-	visible = false
-	exclusive = false
-	close_requested.connect(hide)
+	size_flags_vertical = Control.SIZE_EXPAND_FILL
 
 	var drop_target = DropTarget.new()
 	drop_target.chat_window = self
@@ -53,20 +47,6 @@ func _init():
 	main_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	main_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	drop_target.add_child(main_vbox)
-
-	# Pinned messages container
-	var pinned_scroll = ScrollContainer.new()
-	pinned_scroll.custom_minimum_size = Vector2(0, 0)
-	pinned_scroll.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	pinned_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	main_vbox.add_child(pinned_scroll)
-
-	pinned_vbox = VBoxContainer.new()
-	pinned_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	pinned_scroll.add_child(pinned_vbox)
-
-	var sep1 = HSeparator.new()
-	main_vbox.add_child(sep1)
 
 	# Scroll container for chat
 	scroll_container = ScrollContainer.new()
@@ -83,6 +63,21 @@ func _init():
 
 	# Detect scrolling to top
 	scroll_container.get_v_scroll_bar().value_changed.connect(_on_scroll_changed)
+
+	var sep1 = HSeparator.new()
+	main_vbox.add_child(sep1)
+
+	# Pinned messages container
+	var pinned_scroll = ScrollContainer.new()
+	pinned_scroll.custom_minimum_size = Vector2(0, 0)
+	pinned_scroll.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	pinned_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	main_vbox.add_child(pinned_scroll)
+
+	pinned_vbox = VBoxContainer.new()
+	pinned_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pinned_scroll.add_child(pinned_vbox)
+
 
 	var sep2 = HSeparator.new()
 	main_vbox.add_child(sep2)
@@ -123,7 +118,8 @@ func _on_scroll_changed(value: float):
 		_refresh_messages(false)
 
 func add_message(msg_data: Dictionary):
-	messages_data.append(msg_data)
+	if not messages_data.has(msg_data):
+		messages_data.append(msg_data)
 	_refresh_messages(true)
 
 func set_messages(history: Array):
@@ -148,7 +144,8 @@ func _refresh_messages(scroll_to_bottom: bool = false):
 		pinned_vbox.add_child(_create_message_node(m, true))
 
 	for i in range(start_idx, messages_data.size()):
-		message_vbox.add_child(_create_message_node(messages_data[i], false))
+		if not messages_data[i].get("pinned", false):
+			message_vbox.add_child(_create_message_node(messages_data[i], false))
 
 	if scroll_to_bottom:
 		call_deferred("_scroll_to_bottom")
@@ -167,18 +164,8 @@ func _create_message_node(m: Dictionary, is_pinned: bool) -> Control:
 		lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5, 0.5))
 		return lbl
 
-	var hbox = HBoxContainer.new()
-	hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	var pin_btn = Button.new()
-	pin_btn.text = "📌" if m.get("pinned", false) else "📍"
-	pin_btn.flat = true
-	pin_btn.tooltip_text = "Unpin" if m.get("pinned", false) else "Pin message"
-	pin_btn.pressed.connect(func():
-		if network:
-			network.toggle_pin_message(m["id"])
-	)
-	hbox.add_child(pin_btn)
+	var mcontainer = MarginContainer.new()
+	mcontainer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var rtl = RichTextLabel.new()
 	rtl.bbcode_enabled = true
@@ -203,5 +190,19 @@ func _create_message_node(m: Dictionary, is_pinned: bool) -> Control:
 		path = path.replace("[", "[lb]")
 		rtl.text = "[color=#" + color + "][b]" + sender_name + ":[/b][/color]\n[img width=150]" + path + "[/img]"
 
-	hbox.add_child(rtl)
-	return hbox
+	mcontainer.add_child(rtl)
+
+	var pin_btn = Button.new()
+	pin_btn.text = "📌" if m.get("pinned", false) else "📍"
+	pin_btn.flat = true
+	pin_btn.tooltip_text = "Unpin" if m.get("pinned", false) else "Pin message"
+	pin_btn.add_theme_font_size_override("font_size", 10)
+	pin_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
+	pin_btn.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	pin_btn.pressed.connect(func():
+		if network:
+			network.toggle_pin_message(m["id"])
+	)
+	mcontainer.add_child(pin_btn)
+
+	return mcontainer

@@ -531,7 +531,6 @@ func _on_peer_connected(id: int):
 
 		# Send chat history to the new user
 		rpc_id(id, "sync_chat_history", chat_history)
-		broadcast_join_message(id)
 
 
 
@@ -561,6 +560,9 @@ func _on_connected_to_server():
 	if _local_username != "":
 		if not is_server and multiplayer.get_unique_id() != 1:
 			rpc_id(1, "request_username_change", multiplayer.get_unique_id(), _local_username)
+	else:
+		if not is_server and multiplayer.get_unique_id() != 1:
+			rpc_id(1, "request_username_change", multiplayer.get_unique_id(), "")
 
 func _request_scene_from_server():
 	if plugin:
@@ -628,10 +630,14 @@ func show_popup(msg: String):
 func request_username_change(id: int, new_username: String):
 	if is_server:
 		if peers.has(id) and (multiplayer.get_remote_sender_id() == id or multiplayer.get_remote_sender_id() == 0):
-			peers[id]["username"] = new_username
+			if new_username != "":
+				peers[id]["username"] = new_username
 			rpc("sync_peer_info", id, peers[id])
 			# Server updates its own
 			sync_peer_info(id, peers[id])
+			if not peers[id].get("has_broadcast_join", false):
+				peers[id]["has_broadcast_join"] = true
+				broadcast_join_message(id)
 
 func _on_connection_failed():
 	tc_print("Connection to server failed.")
