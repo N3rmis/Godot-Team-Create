@@ -108,20 +108,30 @@ func _on_filesystem_changed():
 	if _is_syncing_files or not multiplayer.has_multiplayer_peer() or multiplayer.get_peers().is_empty():
 		return
 
+	var current_files = get_all_files("res://")
+	var current_files_dict = {}
+	for path in current_files:
+		current_files_dict[path] = true
+
+	var known_files_dict = {}
+	for path in _known_files:
+		known_files_dict[path] = true
+
 	# Clear cache entries for files that were removed
 	var keys_to_remove = []
 	for path in _file_hash_cache.keys():
-		if not FileAccess.file_exists(path):
+		if not current_files_dict.has(path):
 			keys_to_remove.append(path)
 	for path in keys_to_remove:
 		_file_hash_cache.erase(path)
 
 	# Check for local files that exceed max_file_size
 	if network and network.max_file_size > 0:
-		var current_files = get_all_files("res://")
 		var removed_any = false
-		for path in current_files:
-			if not _known_files.has(path) and FileAccess.file_exists(path):
+		var i = current_files.size() - 1
+		while i >= 0:
+			var path = current_files[i]
+			if not known_files_dict.has(path):
 				var f = FileAccess.open(path, FileAccess.READ)
 				if f:
 					var size = f.get_length()
@@ -132,18 +142,21 @@ func _on_filesystem_changed():
 						if _file_hash_cache.has(path):
 							_file_hash_cache.erase(path)
 						removed_any = true
+						current_files.remove_at(i)
+						current_files_dict.erase(path)
+			i -= 1
+
 		if removed_any:
 			# Scan again so editor notices deleted files
 			if network.plugin and network.plugin.get_editor_interface().get_resource_filesystem():
 				network.plugin.get_editor_interface().get_resource_filesystem().scan()
 
 	# Automatically sync files whenever Godot detects a local file system change.
-	sync_all_files()
+	sync_all_files(current_files)
 
 	# Check for local deletions and broadcast them
-	var current_files = get_all_files("res://")
 	for known_path in _known_files:
-		if not current_files.has(known_path):
+		if not current_files_dict.has(known_path):
 			rpc("remote_delete_file", known_path)
 
 	_known_files = current_files.duplicate()
@@ -159,9 +172,10 @@ func sync_project_settings():
 		if bytes:
 			rpc("receive_project_settings", bytes)
 
-func sync_all_files():
+func sync_all_files(all_files: Array = []):
 	_is_syncing_files = true
-	var all_files = get_all_files("res://")
+	if all_files.is_empty():
+		all_files = get_all_files("res://")
 	var file_hashes = {}
 	for path in all_files:
 		if path.begins_with("res://addons/team_create"):
@@ -170,9 +184,10 @@ func sync_all_files():
 	rpc("compare_and_sync_files", file_hashes)
 	_is_syncing_files = false
 
-func sync_all_files_to_peer(id: int):
+func sync_all_files_to_peer(id: int, all_files: Array = []):
 	if multiplayer.is_server():
-		var all_files = get_all_files("res://")
+		if all_files.is_empty():
+			all_files = get_all_files("res://")
 		var file_hashes = {}
 		for path in all_files:
 			if path.begins_with("res://addons/team_create"):
