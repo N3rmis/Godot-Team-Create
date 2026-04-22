@@ -333,7 +333,6 @@ func request_file(path: String):
 			rpc_id(sender_id, "receive_file", path, randi(), bytes, true)
 			return
 
-		# TODO: Abstract chunking logic into a reusable helper for large RPC data transfers
 		rpc_id(sender_id, "receive_file", path, randi(), bytes, true)
 	else:
 		rpc_id(sender_id, "receive_file", path, randi(), PackedByteArray(), true)
