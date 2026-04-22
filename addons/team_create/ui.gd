@@ -399,3 +399,12 @@ func _on_export_dir_selected(dir: String) -> void:
 		else:
 			network.tc_print("Failed to load server_exporter.gd")
 
+
+func show_error(title: String, message: String) -> void:
+	var dialog = AcceptDialog.new()
+	dialog.title = title
+	dialog.dialog_text = message
+	add_child(dialog)
+	dialog.popup_centered()
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)

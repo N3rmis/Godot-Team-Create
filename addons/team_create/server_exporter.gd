@@ -249,18 +249,22 @@ echo Starting Team Create Server...
 pause
 """
 
-# TODO: Return boolean success/failure to abort export if file copy fails midway (e.g. permission denied)
-static func copy_dir_recursive(from_path: String, to_path: String, ignore_paths: Array = []) -> void:
+static func copy_dir_recursive(from_path: String, to_path: String, ignore_paths: Array = []) -> bool:
 	if not DirAccess.dir_exists_absolute(from_path):
-		return
+		return false
 	if not DirAccess.dir_exists_absolute(to_path):
-		DirAccess.make_dir_recursive_absolute(to_path)
+		var err = DirAccess.make_dir_recursive_absolute(to_path)
+		if err != OK:
+			return false
 
 	var dir = DirAccess.open(from_path)
 	if dir:
 		dir.include_hidden = true
 		dir.include_navigational = false
-		dir.list_dir_begin()
+		var err = dir.list_dir_begin()
+		if err != OK:
+			return false
+
 		var file_name = dir.get_next()
 		while file_name != "":
 			var src_path = from_path.path_join(file_name)
@@ -278,16 +282,24 @@ static func copy_dir_recursive(from_path: String, to_path: String, ignore_paths:
 
 			if not should_ignore:
 				if dir.current_is_dir():
-					copy_dir_recursive(src_path, dest_path, ignore_paths)
+					if not copy_dir_recursive(src_path, dest_path, ignore_paths):
+						return false
 				else:
 					var f_in = FileAccess.open(src_path, FileAccess.READ)
+					if not f_in:
+						return false
 					var f_out = FileAccess.open(dest_path, FileAccess.WRITE)
-					if f_in and f_out:
-						f_out.store_buffer(f_in.get_buffer(f_in.get_length()))
+					if not f_out:
 						f_in.close()
-						f_out.close()
+						return false
+					f_out.store_buffer(f_in.get_buffer(f_in.get_length()))
+					f_in.close()
+					f_out.close()
 			file_name = dir.get_next()
 		dir.list_dir_end()
+		return true
+	else:
+		return false
 
 static func export_server(target_dir: String, caller_ui: Control) -> void:
 	target_dir = ProjectSettings.globalize_path(target_dir)
@@ -315,21 +327,32 @@ static func export_server(target_dir: String, caller_ui: Control) -> void:
 
 	# Provide ignore paths: we don't want to copy the huge .godot folder, nor the target export dir if it's inside res://
 	var ignore_paths = ["res://.godot", "res://.git", target_dir]
-	copy_dir_recursive("res://", temp_project_dir, ignore_paths)
+	if not copy_dir_recursive("res://", temp_project_dir, ignore_paths):
+		_abort_export(caller_ui, "Failed to clone project to temporary directory.")
+		return
 
 	# Write server specific files into the temp project
 	if not DirAccess.dir_exists_absolute(temp_project_dir + "/addons/team_create"):
-		DirAccess.make_dir_recursive_absolute(temp_project_dir + "/addons/team_create")
+		var err = DirAccess.make_dir_recursive_absolute(temp_project_dir + "/addons/team_create")
+		if err != OK:
+			_abort_export(caller_ui, "Failed to create addons directory in temp project.")
+			return
 
 	var script_file = FileAccess.open(temp_project_dir + "/addons/team_create/server.gd", FileAccess.WRITE)
 	if script_file:
 		script_file.store_string(SERVER_SCRIPT_TEMPLATE)
 		script_file.close()
+	else:
+		_abort_export(caller_ui, "Failed to write server.gd to temp project.")
+		return
 
 	var tscn_file = FileAccess.open(temp_project_dir + "/addons/team_create/server.tscn", FileAccess.WRITE)
 	if tscn_file:
 		tscn_file.store_string(TSCN_TEMPLATE)
 		tscn_file.close()
+	else:
+		_abort_export(caller_ui, "Failed to write server.tscn to temp project.")
+		return
 
 	var proj_path = temp_project_dir + "/project.godot"
 
@@ -339,12 +362,17 @@ static func export_server(target_dir: String, caller_ui: Control) -> void:
 		f_proj_append.seek_end()
 		f_proj_append.store_string("\n[application]\nrun/main_scene.teamcreateserver=\"res://addons/team_create/server.tscn\"\n")
 		f_proj_append.close()
+	else:
+		_abort_export(caller_ui, "Failed to modify project.godot in temp project.")
+		return
 
 	# User prefers raw project directory rather than a hidden PCK.
 	# 1. ALWAYS clone temp_project_dir to target_dir/project
 	print("Bundling project directory...")
 	var target_project_dir = target_dir + "/project"
-	copy_dir_recursive(temp_project_dir, target_project_dir, [])
+	if not copy_dir_recursive(temp_project_dir, target_project_dir, []):
+		_abort_export(caller_ui, "Failed to bundle project directory to target location.")
+		return
 
 	# Patch target project.godot to make server.tscn the default main scene directly
 	var t_proj = FileAccess.open(target_project_dir + "/project.godot", FileAccess.READ_WRITE)
@@ -352,20 +380,36 @@ static func export_server(target_dir: String, caller_ui: Control) -> void:
 		t_proj.seek_end()
 		t_proj.store_string("\n[application]\nrun/main_scene=\"res://addons/team_create/server.tscn\"\n")
 		t_proj.close()
+	else:
+		_abort_export(caller_ui, "Failed to patch project.godot in target location.")
+		return
 
 	# 2. ALWAYS generate script wrappers
 	var linux_sh = FileAccess.open(target_dir + "/start_server.sh", FileAccess.WRITE)
 	if linux_sh:
 		linux_sh.store_string(LINUX_SH_TEMPLATE)
 		linux_sh.close()
+	else:
+		_abort_export(caller_ui, "Failed to write start_server.sh.")
+		return
 
 	var win_bat = FileAccess.open(target_dir + "/start_server.bat", FileAccess.WRITE)
 	if win_bat:
 		win_bat.store_string(WINDOWS_BAT_TEMPLATE)
 		win_bat.close()
+	else:
+		_abort_export(caller_ui, "Failed to write start_server.bat.")
+		return
 
 	print("Export complete! Project bundled in: " + target_dir)
 	print("Run the server using start_server.sh or start_server.bat!")
 
+	caller_ui.export_btn.text = "Export Headless Server"
+	caller_ui.export_btn.disabled = false
+
+
+static func _abort_export(caller_ui: Control, message: String) -> void:
+	printerr("Export Failed: ", message)
+	caller_ui.show_error("Export Failed", message)
 	caller_ui.export_btn.text = "Export Headless Server"
 	caller_ui.export_btn.disabled = false
