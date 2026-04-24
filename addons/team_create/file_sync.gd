@@ -308,7 +308,10 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 		call_deferred("_update_sync_blocker")
 
 	for path in files_to_request:
-		rpc_id(sender_id, "request_file", path)
+		if network and network.http_server and sender_id == 1:
+			_request_file_http(path, sender_id)
+		else:
+			rpc_id(sender_id, "request_file", path)
 
 	if _pending_files_to_receive == 0:
 		sync_completed.emit()
@@ -324,6 +327,11 @@ func request_file(path: String):
 		rpc_id(sender_id, "receive_file", path, randi(), PackedByteArray(), true)
 		return
 
+
+	if network and network.http_server and sender_id == 1:
+		_upload_file_http(path, sender_id)
+		return
+
 	# Send file back
 	if FileAccess.file_exists(path):
 		var bytes = FileAccess.get_file_as_bytes(path)
@@ -336,6 +344,7 @@ func request_file(path: String):
 		rpc_id(sender_id, "receive_file", path, randi(), bytes, true)
 	else:
 		rpc_id(sender_id, "receive_file", path, randi(), PackedByteArray(), true)
+
 
 @rpc("any_peer", "reliable")
 func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_final: bool = true):
@@ -471,3 +480,44 @@ func remote_delete_file(path: String):
 		# Remove from known files
 		if _known_files.has(path):
 			_known_files.erase(path)
+
+
+func _request_file_http(path: String, sender_id: int):
+	var http_request = HTTPRequest.new()
+	add_child(http_request)
+	http_request.request_completed.connect(self._on_http_file_downloaded.bind(http_request, path, sender_id))
+	var encoded_path = path.uri_encode()
+	var url = "http://" + network.server_ip + ":" + str(network.HTTP_PORT) + "/get_file?path=" + encoded_path
+	var err = http_request.request(url)
+	if err != OK:
+		printerr("Team Create: Failed to request file via HTTP: ", path)
+		# Fallback to empty receive to not block sync
+		receive_file(path, 0, PackedByteArray(), true)
+
+func _on_http_file_downloaded(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, http_request: HTTPRequest, path: String, sender_id: int):
+	http_request.queue_free()
+	if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:
+		receive_file(path, 0, body, true)
+	else:
+		printerr("Team Create: Failed to download file via HTTP: ", path, " Code: ", response_code)
+		receive_file(path, 0, PackedByteArray(), true)
+
+
+
+func _upload_file_http(path: String, sender_id: int):
+	var http_request = HTTPRequest.new()
+	add_child(http_request)
+	http_request.request_completed.connect(self._on_http_file_uploaded.bind(http_request, path, sender_id))
+	var encoded_path = path.uri_encode()
+	var url = "http://" + network.server_ip + ":" + str(network.HTTP_PORT) + "/upload_file?path=" + encoded_path
+	var body = PackedByteArray()
+	if FileAccess.file_exists(path):
+		body = FileAccess.get_file_as_bytes(path)
+	var err = http_request.request_raw(url, ["Content-Type: application/octet-stream"], HTTPClient.METHOD_POST, body)
+	if err != OK:
+		printerr("Team Create: Failed to upload file via HTTP: ", path)
+
+func _on_http_file_uploaded(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, http_request: HTTPRequest, path: String, sender_id: int):
+	http_request.queue_free()
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		printerr("Team Create: Failed to upload file via HTTP: ", path, " Code: ", response_code)

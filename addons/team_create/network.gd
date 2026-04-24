@@ -11,6 +11,9 @@ var ui: Control
 var plugin: Node
 var peer = ENetMultiplayerPeer.new()
 var is_server = false
+var http_server = null
+var server_ip = "127.0.0.1"
+const HTTP_PORT = 12345
 var is_standalone_server = false
 var peers = {} # Dictionary mapping peer_id to user info (username, color)
 var _color_assignment_counter = 0
@@ -64,6 +67,13 @@ func _ready():
 	_load_chat_history()
 
 	name = "TeamCreateNetwork"
+	var http_server_script = load("res://addons/team_create/http_server.gd")
+	if http_server_script:
+		http_server = http_server_script.new()
+		http_server.name = "TeamCreateHTTPServer"
+		http_server.network = self
+		add_child(http_server)
+
 	# Load sync modules
 	var file_sync_script = load("res://addons/team_create/file_sync.gd")
 	if file_sync_script:
@@ -469,10 +479,13 @@ func host_server():
 	is_server = true
 	_add_peer(1)
 	call_deferred("_update_local_chat_ui")
+	if http_server:
+		http_server.start_server()
 	_update_ui_state()
 
 func join_server(ip: String):
 	disconnect_peer()
+	server_ip = ip
 	var err = peer.create_client(ip, PORT)
 	if err != OK:
 		tc_print("Failed to join server: Error code ", err)
@@ -494,6 +507,8 @@ func disconnect_peer():
 	_assigned_colors.clear()
 	if ui:
 		ui.set_disconnected()
+	if http_server:
+		http_server.stop_server()
 	if file_sync:
 		file_sync._hide_sync_blocker()
 	if was_connected:
