@@ -57,12 +57,12 @@ func _process(delta):
 
 											if _is_safe_path(path) and FileAccess.file_exists(path):
 												var file_bytes = FileAccess.get_file_as_bytes(path)
-												var response_headers = "HTTP/1.1 200 OK\r\nContent-Length: " + str(file_bytes.size()) + "\r\n\r\n"
+												var response_headers = "HTTP/1.1 200 OK\r\nContent-Length: " + str(file_bytes.size()) + "\r\nConnection: close\r\n\r\n"
 												resp["data"].append_array(response_headers.to_utf8_buffer())
 												resp["data"].append_array(file_bytes)
 												resp["active"] = true
 											else:
-												var response_headers = "HTTP/1.1 404 Not Found\r\n\r\n"
+												var response_headers = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
 												resp["data"].append_array(response_headers.to_utf8_buffer())
 												resp["active"] = true
 								elif req_str.begins_with("POST "):
@@ -106,19 +106,12 @@ func _process(delta):
 												if header_end_idx != -1 and _http_buffers[peer].size() >= header_end_idx + header_len + content_length:
 													var body_bytes = _http_buffers[peer].slice(header_end_idx + header_len, header_end_idx + header_len + content_length)
 
-													var file = FileAccess.open(path, FileAccess.WRITE)
-													if file:
-														file.store_buffer(body_bytes)
-														file.close()
-														receive_file(path, randi(), body_bytes, true)
+													# receive_file will handle dir creation and writing
+													receive_file(path, randi(), body_bytes, true)
 
-														var response_headers = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
-														resp["data"].append_array(response_headers.to_utf8_buffer())
-														resp["active"] = true
-													else:
-														var response_headers = "HTTP/1.1 500 Internal Server Error\r\n\r\n"
-														resp["data"].append_array(response_headers.to_utf8_buffer())
-														resp["active"] = true
+													var response_headers = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+													resp["data"].append_array(response_headers.to_utf8_buffer())
+													resp["active"] = true
 
 								if not resp["active"]:
 									# Check if it's a POST waiting for more body data
