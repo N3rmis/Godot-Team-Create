@@ -875,6 +875,12 @@ func _send_update_node_property(id: String, prop_name: String, value: Variant, s
 @rpc("any_peer", "reliable")
 func update_node_property_chunked(id: String, prop_name: String, transfer_id: int, chunk: PackedByteArray, scene_path: String = "", is_final: bool = true):
 	var sender_id = multiplayer.get_remote_sender_id()
+
+	if multiplayer.is_server() and sender_id != 0:
+		for peer_id in multiplayer.get_peers():
+			if peer_id != sender_id:
+				rpc_id(peer_id, "update_node_property_chunked", id, prop_name, transfer_id, chunk, scene_path, is_final)
+
 	var prop_key = str(sender_id) + "_" + id + "_" + prop_name + "_" + str(transfer_id)
 
 	if not _receiving_properties.has(prop_key):
@@ -893,6 +899,13 @@ func update_node_property_chunked(id: String, prop_name: String, transfer_id: in
 
 @rpc("any_peer", "reliable")
 func update_node_property(id: String, prop_name: String, value: Variant, scene_path: String = ""):
+	var sender_id = multiplayer.get_remote_sender_id()
+
+	if multiplayer.is_server() and sender_id != 0:
+		for peer_id in multiplayer.get_peers():
+			if peer_id != sender_id:
+				rpc_id(peer_id, "update_node_property", id, prop_name, value, scene_path)
+
 	# Block metadata updates for security
 	if prop_name.begins_with("metadata/"):
 		printerr("Team Create: Blocked unsafe property sync: ", prop_name)
