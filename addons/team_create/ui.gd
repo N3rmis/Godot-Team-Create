@@ -132,7 +132,6 @@ func _init() -> void:
 	lan_container = VBoxContainer.new()
 	conn_vbox.add_child(lan_container)
 
-	# TODO: Save recently used IP addresses in EditorSettings so users don't have to retype them
 	ip_edit = LineEdit.new()
 	ip_edit.text = "127.0.0.1"
 	ip_edit.placeholder_text = "Host IP Address (e.g., 127.0.0.1)"
@@ -140,6 +139,7 @@ func _init() -> void:
 	ip_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ip_edit.clear_button_enabled = true
 	ip_edit.select_all_on_focus = true
+	ip_edit.text_changed.connect(_on_ip_changed)
 	lan_container.add_child(ip_edit)
 
 	var lan_btn_hbox = HBoxContainer.new()
@@ -273,6 +273,12 @@ func _ready() -> void:
 				username_edit.text = saved_name
 				_on_username_changed(saved_name)
 
+		if settings.has_setting("team_create/last_ip"):
+			var saved_ip = settings.get_setting("team_create/last_ip")
+			if saved_ip != "":
+				ip_edit.text = saved_ip
+				_on_ip_changed(saved_ip)
+
 func set_connected(is_host: bool, connected_to_standalone: bool = false) -> void:
 	host_btn.disabled = true
 	join_btn.disabled = true
@@ -351,6 +357,12 @@ func _on_username_changed(new_text: String) -> void:
 			settings.set_setting("team_create/username", new_text)
 
 		network.update_local_username(new_text)
+
+func _on_ip_changed(new_text: String) -> void:
+	if network:
+		if network.plugin:
+			var settings = network.plugin.get_editor_interface().get_editor_settings()
+			settings.set_setting("team_create/last_ip", new_text)
 
 func _on_host_pressed() -> void:
 	if network:
