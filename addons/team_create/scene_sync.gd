@@ -286,18 +286,77 @@ func _process(delta):
 	_sync_cursor_throttled(delta)
 
 	# Process pending resource properties (waiting for file sync)
+	if _pending_resource_properties.is_empty():
+		return
+
+	var is_scanning = false
+	if network and network.plugin and network.plugin.get_editor_interface() and network.plugin.get_editor_interface().get_resource_filesystem():
+		is_scanning = network.plugin.get_editor_interface().get_resource_filesystem().is_scanning()
+
+	var ext_resource_regex = RegEx.new()
+	ext_resource_regex.compile("ext_resource.*path=\"(res://[^\"]+)\"")
+
 	for i in range(_pending_resource_properties.size() - 1, -1, -1):
 		var pending = _pending_resource_properties[i]
-		if network and network.file_sync and pending.value in network.file_sync.downloading_files:
+
+		var is_ready = false
+		var should_continue = false
+		if typeof(pending.value) == TYPE_STRING and (pending.value as String).begins_with("res://"):
+			if is_scanning:
+				should_continue = true
+			elif network and network.file_sync and pending.value in network.file_sync.downloading_files:
+				should_continue = true
+			elif ResourceLoader.exists(pending.value):
+				is_ready = true
+		elif typeof(pending.value) == TYPE_DICTIONARY and pending.value.has("sub_resource_bytes"):
+			is_ready = true
+			if is_scanning:
+				should_continue = true
+				is_ready = false
+			else:
+				var text = pending.value.get("sub_resource_text", "")
+				if text != "":
+					for m in ext_resource_regex.search_all(text):
+						var ext_path = m.get_string(1)
+						if network and network.file_sync and ext_path in network.file_sync.downloading_files:
+							should_continue = true
+							is_ready = false
+							break
+						if not ResourceLoader.exists(ext_path):
+							is_ready = false
+							break
+
+		if should_continue:
 			continue
-		if ResourceLoader.exists(pending.value):
+
+		if is_ready:
 			var current_scene = _get_target_scene(pending.scene_path)
 			if current_scene and current_scene.get_meta("scene_file_path", current_scene.scene_file_path) == pending.scene_path:
 				var node = network.get_node_by_unique_id(current_scene, pending.id)
 				if is_instance_valid(node):
-					var res = load(pending.value)
-					if res:
-						node.set(pending.prop_name, res)
+					if typeof(pending.value) == TYPE_STRING and (pending.value as String).begins_with("res://"):
+						var res = load(pending.value)
+						if res:
+							node.set(pending.prop_name, res)
+					elif typeof(pending.value) == TYPE_DICTIONARY:
+						var res = bytes_to_var_with_objects(pending.value["sub_resource_bytes"])
+						if res is Resource:
+							var path = pending.value.get("resource_path", "")
+							if path != "":
+								var existing_res = null
+								if ResourceLoader.has_cached(path):
+									existing_res = load(path)
+								if existing_res and existing_res.get_class() == res.get_class():
+									var props = res.get_property_list()
+									for p in props:
+										var p_name = p.name
+										if p.usage & PROPERTY_USAGE_STORAGE or p.usage & PROPERTY_USAGE_EDITOR:
+											if p_name != "resource_path" and p_name != "resource_local_to_scene" and p_name != "resource_name":
+												existing_res.set(p_name, res.get(p_name))
+									res = existing_res
+								else:
+									res.take_over_path(path)
+							node.set(pending.prop_name, res)
 			_pending_resource_properties.remove_at(i)
 		else:
 			if Time.get_ticks_msec() > pending.timeout:
@@ -917,8 +976,12 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 
 				# It's a resource path
 				var is_downloading = network and network.file_sync and value in network.file_sync.downloading_files
+				var is_scanning = false
+				if network and network.plugin and network.plugin.get_editor_interface() and network.plugin.get_editor_interface().get_resource_filesystem():
+					is_scanning = network.plugin.get_editor_interface().get_resource_filesystem().is_scanning()
+
 				var res = null
-				if not is_downloading and ResourceLoader.exists(value):
+				if not is_downloading and not is_scanning and ResourceLoader.exists(value):
 					res = load(value)
 
 				if res:
@@ -933,27 +996,51 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 					# Push to pending queue waiting for file sync to complete
 					_pending_resource_properties.append({"id": id, "prop_name": prop_name, "value": value, "scene_path": scene_path, "timeout": Time.get_ticks_msec() + 15000})
 			elif typeof(value) == TYPE_DICTIONARY and value.has("sub_resource_bytes"):
-				var res = bytes_to_var_with_objects(value["sub_resource_bytes"])
-				if res is Resource:
-					var path = value.get("resource_path", "")
-					if path != "":
-						var existing_res = null
-						if ResourceLoader.has_cached(path):
-							existing_res = load(path)
+				var is_scanning = false
+				if network and network.plugin and network.plugin.get_editor_interface() and network.plugin.get_editor_interface().get_resource_filesystem():
+					is_scanning = network.plugin.get_editor_interface().get_resource_filesystem().is_scanning()
 
-						if existing_res and existing_res.get_class() == res.get_class():
-							# Copy properties to the existing shared resource
-							var props = res.get_property_list()
-							for p in props:
-								var p_name = p.name
-								if p.usage & PROPERTY_USAGE_STORAGE or p.usage & PROPERTY_USAGE_EDITOR:
-									if p_name != "resource_path" and p_name != "resource_local_to_scene" and p_name != "resource_name":
-										existing_res.set(p_name, res.get(p_name))
-							res = existing_res
-						else:
-							res.take_over_path(path)
+				var is_ready = true
+				if is_scanning:
+					is_ready = false
+				else:
+					var text = value.get("sub_resource_text", "")
+					if text != "":
+						var regex = RegEx.new()
+						regex.compile("ext_resource.*path=\"(res://[^\"]+)\"")
+						for m in regex.search_all(text):
+							var ext_path = m.get_string(1)
+							if network and network.file_sync and ext_path in network.file_sync.downloading_files:
+								is_ready = false
+								break
+							if not ResourceLoader.exists(ext_path):
+								is_ready = false
+								break
 
-					node.set(prop_name, res)
+				if is_ready:
+					var res = bytes_to_var_with_objects(value["sub_resource_bytes"])
+					if res is Resource:
+						var path = value.get("resource_path", "")
+						if path != "":
+							var existing_res = null
+							if ResourceLoader.has_cached(path):
+								existing_res = load(path)
+
+							if existing_res and existing_res.get_class() == res.get_class():
+								# Copy properties to the existing shared resource
+								var props = res.get_property_list()
+								for p in props:
+									var p_name = p.name
+									if p.usage & PROPERTY_USAGE_STORAGE or p.usage & PROPERTY_USAGE_EDITOR:
+										if p_name != "resource_path" and p_name != "resource_local_to_scene" and p_name != "resource_name":
+											existing_res.set(p_name, res.get(p_name))
+								res = existing_res
+							else:
+								res.take_over_path(path)
+
+						node.set(prop_name, res)
+				else:
+					_pending_resource_properties.append({"id": id, "prop_name": prop_name, "value": value, "scene_path": scene_path, "retries": 100})
 			elif prop_name == "__connections__":
 				_apply_connections(node, value, current_scene)
 			else:
