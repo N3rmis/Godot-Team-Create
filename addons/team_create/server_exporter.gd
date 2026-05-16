@@ -44,14 +44,7 @@ class DummyEditorInterface:
 	func get_open_scenes(): return []
 
 	func restart_editor():
-		print("Restarting standalone server...")
-		if OS.has_method("set_restart_on_exit"):
-			OS.set_restart_on_exit(true, OS.get_cmdline_args())
-		elif OS.has_method("create_instance"):
-			OS.create_instance(OS.get_cmdline_args())
-		elif OS.has_method("create_process"):
-			OS.create_process(OS.get_executable_path(), OS.get_cmdline_args())
-
+		print("Closing standalone server...")
 		var main_loop = Engine.get_main_loop()
 		if main_loop and main_loop.has_method("quit"):
 			main_loop.quit(0)
@@ -151,7 +144,7 @@ class DummyEditorPlugin extends Node:
 
 		zip_reader.close()
 		DirAccess.remove_absolute(zip_path)
-		print_rich("[color=green]Update applied successfully! Restarting server...[/color]")
+		print_rich("[color=green]Update applied successfully! Closing server...[/color]")
 
 		get_editor_interface().restart_editor()
 

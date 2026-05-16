@@ -126,7 +126,7 @@ func _process_console_command(input: String):
 			tc_print_rich("[color=white]/kick <user>[/color]   - Kicks a user from the server")
 			tc_print_rich("[color=white]/list[/color]          - Lists all connected users")
 			tc_print_rich("[color=white]/info[/color]          - Shows server statistics (memory, CPU, players, etc.)")
-			tc_print_rich("[color=white]/update[/color]        - Downloads latest update and restarts the server")
+			tc_print_rich("[color=white]/update[/color]        - Downloads latest update and closes the server")
 			tc_print_rich("[color=white]/restart[/color]       - Restarts the server")
 			tc_print_rich("[color=white]/stop[/color]          - Stops and exits the server")
 			tc_print_rich("[color=white]/saveprints <true/false>[/color] - Toggles auto-save prints")
@@ -359,9 +359,9 @@ func _process_console_command(input: String):
 				tc_print_rich("[color=red]User not found: " + target_username + "[/color]")
 
 	elif cmd == "/update":
-		tc_print_rich("[color=cyan]Updating plugin and restarting server...[/color]")
+		tc_print_rich("[color=cyan]Updating plugin and closing server...[/color]")
 		if plugin and plugin.has_method("download_update"):
-			call_deferred("_deferred_update_and_restart")
+			call_deferred("_deferred_update_and_close")
 		else:
 			tc_print_rich("[color=red]Update mechanism not available.[/color]")
 
@@ -406,10 +406,10 @@ func _process_console_command(input: String):
 	else:
 		tc_print_rich("[color=red]Unknown command: " + cmd + "[/color]")
 
-func _deferred_update_and_restart():
+func _deferred_update_and_close():
 	if plugin and plugin.has_method("download_update"):
 		plugin.download_update()
-		# Actual restart is handled when extraction completes
+		# Actual close is handled when extraction completes
 
 func _deferred_restart():
 	# Clean up network connections before restarting
