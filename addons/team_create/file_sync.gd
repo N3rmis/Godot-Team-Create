@@ -422,11 +422,20 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 			continue
 		local_hashes[path] = _get_cached_md5(path)
 
+	var open_scenes = []
+	if network and network.plugin:
+		open_scenes = network.plugin.get_editor_interface().get_open_scenes()
+
 	# Find files to delete (only allow the server to delete files to prevent clients wiping the server)
 	if sender_id == 1:
 		for path in local_hashes:
 			if not peer_hashes.has(path):
-				DirAccess.remove_absolute(path)
+				if path in open_scenes:
+					network.tc_print("Skipping deletion of open scene: ", path)
+					continue
+				var err = DirAccess.remove_absolute(path)
+				if err != OK:
+					continue
 				if _file_hash_cache.has(path):
 					_file_hash_cache.erase(path)
 				network.tc_print("Deleted unused file: ", path)
