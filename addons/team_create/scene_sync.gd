@@ -857,7 +857,18 @@ func _send_update_node_property(id: String, prop_name: String, value: Variant, s
 	# Always serialize to check size
 	bytes = var_to_bytes_with_objects(value)
 
-	rpc("update_node_property", id, prop_name, value, scene_path)
+	if bytes.size() > 60000:
+		var transfer_id = randi()
+		var total_size = bytes.size()
+		var sent = 0
+		while sent < total_size:
+			var to_send = min(60000, total_size - sent)
+			var chunk = bytes.slice(sent, sent + to_send)
+			sent += to_send
+			var is_final = sent >= total_size
+			rpc("update_node_property_chunked", id, prop_name, transfer_id, chunk, scene_path, is_final)
+	else:
+		rpc("update_node_property", id, prop_name, value, scene_path)
 
 @rpc("any_peer", "reliable")
 func update_node_property_chunked(id: String, prop_name: String, transfer_id: int, chunk: PackedByteArray, scene_path: String = "", is_final: bool = true):
