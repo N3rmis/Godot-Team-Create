@@ -101,7 +101,7 @@ func _process(delta):
 func _setup_http_server():
 	if network and network.get("is_standalone_server"):
 		_http_server = TCPServer.new()
-		var port = network.get("PORT", 12345) + 1
+		var port = network.PORT + 1 if "PORT" in network else 12346
 		var err = _http_server.listen(port)
 		if err == OK:
 			network.tc_print("HTTP File Server listening on port " + str(port))
@@ -436,7 +436,7 @@ func _download_file_http(path: String):
 	var ip = network.server_ip
 	if ip == "":
 		ip = "127.0.0.1"
-	var port = network.get("PORT", 12345) + 1
+	var port = network.PORT + 1 if "PORT" in network else 12346
 
 	var raw_path = path.replace("res://", "/res/")
 	var path_parts = raw_path.split("/")
