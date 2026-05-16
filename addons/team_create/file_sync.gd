@@ -7,6 +7,108 @@ var network: Node
 var _is_syncing_files = false
 var _scan_timer = null
 
+var _http_server: TCPServer
+var _http_clients: Array = []
+var _http_buffers: Dictionary = {}
+var _http_responses: Dictionary = {}
+
+func _process(delta):
+	if _http_server and _http_server.is_listening():
+		if _http_server.is_connection_available():
+			var peer = _http_server.take_connection()
+			_http_clients.append(peer)
+			_http_buffers[peer] = PackedByteArray()
+			_http_responses[peer] = { "data": PackedByteArray(), "sent": 0, "active": false, "timer": 0.0 }
+
+		for i in range(_http_clients.size() - 1, -1, -1):
+			var peer: StreamPeerTCP = _http_clients[i]
+			peer.poll()
+			var status = peer.get_status()
+
+			if status == StreamPeerTCP.STATUS_CONNECTED:
+				var resp = _http_responses[peer]
+				resp["timer"] += delta
+
+				# Timeout idle connections (10 seconds)
+				if resp["timer"] > 10.0:
+					peer.disconnect_from_host()
+					_http_clients.remove_at(i)
+					_http_buffers.erase(peer)
+					_http_responses.erase(peer)
+					continue
+
+				if not resp["active"]:
+					if peer.get_available_bytes() > 0:
+						var bytes = peer.get_data(peer.get_available_bytes())
+						if bytes[0] == OK:
+							_http_buffers[peer].append_array(bytes[1])
+							var req_str = _http_buffers[peer].get_string_from_utf8()
+
+							if "\r\n\r\n" in req_str or "\n\n" in req_str:
+								if req_str.begins_with("GET "):
+									var lines = req_str.split("\n")
+									if lines.size() > 0:
+										var parts = lines[0].split(" ")
+										if parts.size() > 1:
+											var path = parts[1]
+											path = path.uri_decode()
+											if path.begins_with("/res/"):
+												path = "res://" + path.substr(5)
+
+											if _is_safe_path(path) and FileAccess.file_exists(path):
+												var file_bytes = FileAccess.get_file_as_bytes(path)
+												var response_headers = "HTTP/1.1 200 OK\r\nContent-Length: " + str(file_bytes.size()) + "\r\n\r\n"
+												resp["data"].append_array(response_headers.to_utf8_buffer())
+												resp["data"].append_array(file_bytes)
+												resp["active"] = true
+											else:
+												var response_headers = "HTTP/1.1 404 Not Found\r\n\r\n"
+												resp["data"].append_array(response_headers.to_utf8_buffer())
+												resp["active"] = true
+
+								if not resp["active"]:
+									peer.disconnect_from_host()
+									_http_clients.remove_at(i)
+									_http_buffers.erase(peer)
+									_http_responses.erase(peer)
+				else:
+					# Active response, send in chunks asynchronously
+					var to_send = resp["data"].size() - resp["sent"]
+					if to_send > 0:
+						var chunk = resp["data"].slice(resp["sent"], resp["sent"] + min(to_send, 65536))
+						var sent_arr = peer.put_partial_data(chunk)
+						if sent_arr[0] == OK:
+							resp["sent"] += sent_arr[1]
+							resp["timer"] = 0.0 # Reset timeout on activity
+						elif sent_arr[0] != ERR_BUSY:
+							# Error
+							peer.disconnect_from_host()
+							_http_clients.remove_at(i)
+							_http_buffers.erase(peer)
+							_http_responses.erase(peer)
+					else:
+						# Done
+						peer.disconnect_from_host()
+						_http_clients.remove_at(i)
+						_http_buffers.erase(peer)
+						_http_responses.erase(peer)
+
+			elif status == StreamPeerTCP.STATUS_ERROR or status == StreamPeerTCP.STATUS_NONE:
+				_http_clients.remove_at(i)
+				_http_buffers.erase(peer)
+				_http_responses.erase(peer)
+
+func _setup_http_server():
+	if network and network.get("is_standalone_server"):
+		_http_server = TCPServer.new()
+		var port = network.get("PORT", 12345) + 1
+		var err = _http_server.listen(port)
+		if err == OK:
+			network.tc_print("HTTP File Server listening on port " + str(port))
+		else:
+			network.tc_print("Failed to start HTTP File Server on port " + str(port))
+
+
 
 func _get_cached_md5(path: String) -> String:
 	var mod_time = FileAccess.get_modified_time(path)
@@ -297,6 +399,11 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 		return a < b
 	)
 
+
+	var use_http = false
+	if network and sender_id == 1 and network.peers.has(1) and network.peers[1].has("is_standalone") and network.peers[1]["is_standalone"]:
+		use_http = true
+
 	_pending_files_to_receive = files_to_request.size()
 	downloading_files.clear()
 	downloading_files.append_array(files_to_request)
@@ -308,12 +415,51 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 		call_deferred("_update_sync_blocker")
 
 	for path in files_to_request:
-		rpc_id(sender_id, "request_file", path)
+
+		if use_http:
+			_download_file_http(path)
+		else:
+			rpc_id(sender_id, "request_file", path)
+
 
 	if _pending_files_to_receive == 0:
 		sync_completed.emit()
 
 	_is_syncing_files = false
+
+
+func _download_file_http(path: String):
+	var http_request = HTTPRequest.new()
+	add_child(http_request)
+	http_request.request_completed.connect(self._http_download_completed.bind(http_request, path))
+
+	var ip = network.server_ip
+	if ip == "":
+		ip = "127.0.0.1"
+	var port = network.get("PORT", 12345) + 1
+
+	var raw_path = path.replace("res://", "/res/")
+	var path_parts = raw_path.split("/")
+	for i in range(path_parts.size()):
+		path_parts[i] = path_parts[i].uri_encode()
+	var encoded_path = "/".join(path_parts)
+	var url = "http://" + ip + ":" + str(port) + encoded_path
+
+	var error = http_request.request(url)
+	if error != OK:
+		printerr("HTTP Request failed for ", path)
+		http_request.queue_free()
+		_finish_http_download(path)
+
+func _http_download_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, http_request: HTTPRequest, path: String):
+	if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:
+		receive_file(path, randi(), body, true)
+	else:
+		printerr("Failed to download file via HTTP: ", path, " Response: ", response_code)
+		_finish_http_download(path)
+
+	http_request.queue_free()
+
 
 @rpc("any_peer", "reliable")
 func request_file(path: String):
@@ -471,3 +617,13 @@ func remote_delete_file(path: String):
 		# Remove from known files
 		if _known_files.has(path):
 			_known_files.erase(path)
+
+func _finish_http_download(path: String):
+	downloading_files.erase(path)
+	if _pending_files_to_receive > 0:
+		_pending_files_to_receive -= 1
+		call_deferred("_update_sync_blocker")
+		if _pending_files_to_receive <= 0:
+			call_deferred("_hide_sync_blocker")
+			_known_files = get_all_files("res://")
+			sync_completed.emit()

@@ -12,6 +12,7 @@ var plugin: Node
 var peer = ENetMultiplayerPeer.new()
 var is_server = false
 var is_standalone_server = false
+var server_ip: String = ""
 var peers = {} # Dictionary mapping peer_id to user info (username, color)
 var _color_assignment_counter = 0
 var _assigned_colors = []
@@ -465,13 +466,18 @@ func host_server():
 		tc_print("Failed to host server: Error code ", err)
 		disconnect_peer()
 		return
+
 	multiplayer.multiplayer_peer = peer
 	is_server = true
+	if is_standalone_server and file_sync:
+		file_sync._setup_http_server()
+
 	_add_peer(1)
 	call_deferred("_update_local_chat_ui")
 	_update_ui_state()
 
 func join_server(ip: String):
+	server_ip = ip
 	disconnect_peer()
 	var err = peer.create_client(ip, PORT)
 	if err != OK:
@@ -818,7 +824,10 @@ func _get_default_peer_info(id: int) -> Dictionary:
 	rng.seed = id
 	var color = _get_random_color(rng)
 	var username = _local_username if id == multiplayer.get_unique_id() and _local_username != "" else _get_random_name(rng)
-	return {"username": username, "color": color}
+	var info = {"username": username, "color": color}
+	if id == 1 and is_standalone_server:
+		info["is_standalone"] = true
+	return info
 
 # User Info management
 func get_user_color(id: int) -> Color:
