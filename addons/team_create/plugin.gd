@@ -193,5 +193,8 @@ func _extract_and_apply_update(zip_path: String) -> void:
 		dock.update_btn.text = "Restarting..."
 
 	# Restart editor
-	var editor_interface = get_editor_interface()
-	editor_interface.restart_editor()
+	if network and DisplayServer.get_name() == "headless":
+		network.call_deferred("_deferred_restart")
+	else:
+		var editor_interface = get_editor_interface()
+		editor_interface.restart_editor()

@@ -144,9 +144,12 @@ class DummyEditorPlugin extends Node:
 
 		zip_reader.close()
 		DirAccess.remove_absolute(zip_path)
-		print_rich("[color=green]Update applied successfully! Closing server...[/color]")
-
-		get_editor_interface().restart_editor()
+		print_rich("[color=green]Update applied successfully! Restarting server...[/color]")
+		var tc_network = get_tree().root.get_node_or_null("TeamCreateNetwork")
+		if tc_network and tc_network.has_method("_deferred_restart"):
+			tc_network.call_deferred("_deferred_restart")
+		else:
+			get_editor_interface().restart_editor()
 
 	func check_for_updates(): pass # No-op in headless
 
