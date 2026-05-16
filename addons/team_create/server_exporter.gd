@@ -385,10 +385,16 @@ static func export_server(target_dir: String, caller_ui: Control) -> void:
 		return
 
 	# 2. ALWAYS generate script wrappers
-	var linux_sh = FileAccess.open(target_dir + "/start_server.sh", FileAccess.WRITE)
+	var linux_sh_path = target_dir + "/start_server.sh"
+	var linux_sh = FileAccess.open(linux_sh_path, FileAccess.WRITE)
 	if linux_sh:
 		linux_sh.store_string(LINUX_SH_TEMPLATE)
 		linux_sh.close()
+		# Only run chmod if the host OS is Unix-like and supports chmod
+		if OS.has_feature("linux") or OS.has_feature("macos") or OS.has_feature("bsd") or OS.has_feature("x11"):
+			var global_sh_path = ProjectSettings.globalize_path(linux_sh_path)
+			var output = []
+			OS.execute("chmod", ["+x", global_sh_path], output)
 	else:
 		_abort_export(caller_ui, "Failed to write start_server.sh.")
 		return
