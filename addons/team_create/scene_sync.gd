@@ -298,8 +298,7 @@ func _process(delta):
 						node.set(pending.prop_name, res)
 			_pending_resource_properties.remove_at(i)
 		else:
-			pending.retries -= 1
-			if pending.retries <= 0:
+			if Time.get_ticks_msec() > pending.timeout:
 				_pending_resource_properties.remove_at(i)
 
 func _track_changes_throttled():
@@ -923,7 +922,7 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 						node.set(prop_name, dummy_res)
 				else:
 					# Push to pending queue waiting for file sync to complete
-					_pending_resource_properties.append({"id": id, "prop_name": prop_name, "value": value, "scene_path": scene_path, "retries": 100}) # About 1-2 seconds at 60 FPS
+					_pending_resource_properties.append({"id": id, "prop_name": prop_name, "value": value, "scene_path": scene_path, "timeout": Time.get_ticks_msec() + 15000})
 			elif typeof(value) == TYPE_DICTIONARY and value.has("sub_resource_bytes"):
 				var res = bytes_to_var_with_objects(value["sub_resource_bytes"])
 				if res is Resource:
