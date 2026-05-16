@@ -891,8 +891,12 @@ func send_chat_message(text: String, image_path: String = ""):
 	var my_id = multiplayer.get_unique_id()
 	if is_server:
 		if text.begins_with("/"):
-			_process_console_command(text)
-			return
+			if is_standalone_server or admins.has(my_id):
+				_process_console_command(text)
+				return
+			else:
+				tc_print("You do not have permission to use admin commands.")
+				return
 		if not chat_locked:
 			if not chat_images_enabled and image_path != "": return
 			_process_new_chat_message(my_id, text, image_path)
@@ -907,8 +911,9 @@ func request_chat_message(text: String, image_path: String):
 	if not is_server: return
 	var sender_id = multiplayer.get_remote_sender_id()
 
-	if text.begins_with("/") and admins.has(sender_id):
-		_process_console_command(text)
+	if text.begins_with("/"):
+		if admins.has(sender_id):
+			_process_console_command(text)
 		return
 
 	if chat_locked: return
