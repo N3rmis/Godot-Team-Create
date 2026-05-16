@@ -361,7 +361,7 @@ func get_all_files(dir_path: String, exclude_dirs: Array = []) -> Array:
 			if dir.current_is_dir():
 				var sub_dir = dir_path.path_join(file_name)
 				if sub_dir == "res://.godot":
-					pass # Completely exclude the res://.godot/ folder entirely
+					files.append_array(get_all_files("res://.godot/imported", exclude_dirs))
 				elif not file_name.begins_with("."):
 					if not exclude_dirs.has(sub_dir):
 						files.append_array(get_all_files(sub_dir, exclude_dirs))

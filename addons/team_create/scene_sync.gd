@@ -1021,20 +1021,33 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 				if network and network.plugin and network.plugin.get_editor_interface() and network.plugin.get_editor_interface().get_resource_filesystem():
 					is_scanning = network.plugin.get_editor_interface().get_resource_filesystem().is_scanning()
 
+				var test_res_exists = ResourceLoader.exists(value)
+				if test_res_exists:
+					var import_path = value + ".import"
+					if FileAccess.file_exists(import_path):
+						var config = ConfigFile.new()
+						var err = config.load(import_path)
+						if err == OK:
+							var dest_files = config.get_value("deps", "dest_files", [])
+							for dest_file in dest_files:
+								if not FileAccess.file_exists(dest_file):
+									test_res_exists = false
+									break
+
 				var res = null
-				if not is_downloading and not is_scanning and ResourceLoader.exists(value):
+				if not is_downloading and not is_scanning and test_res_exists:
 					res = load(value)
 
 				if res:
 					node.set(prop_name, res)
-				elif network.get("is_standalone_server"):
-					# Standalone server cannot load imported resources. Create a dummy.
-					var dummy_path = network._get_or_create_dummy_resource(value, "Resource") # Default to Resource, Godot will accept it in scripts, but might drop for typed props.
+				elif network.get("is_standalone_server") and (not test_res_exists or not is_scanning):
+					# Fallback: if missing on a standalone server, bypass load() and dummy it.
+					var dummy_path = network._get_or_create_dummy_resource(value, "Resource")
 					var dummy_res = load(dummy_path)
 					if dummy_res:
 						node.set(prop_name, dummy_res)
 				else:
-					# Push to pending queue waiting for file sync to complete
+					# Delay/Queue: if the actual file is missing but the editor is_scanning() (or file just missing)
 					_pending_resource_properties.append({"id": id, "prop_name": prop_name, "value": value, "scene_path": scene_path, "timeout": Time.get_ticks_msec() + 15000})
 			elif typeof(value) == TYPE_DICTIONARY and value.has("sub_resource_bytes"):
 				var is_scanning = false
