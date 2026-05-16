@@ -249,7 +249,7 @@ func _on_node_tree_exiting(node: Node):
 		if node == edited_scene or current_scene != edited_scene:
 			return
 
-	if multiplayer.has_multiplayer_peer() and not multiplayer.get_peers().is_empty():
+	if multiplayer and multiplayer.has_multiplayer_peer() and not (multiplayer.get_peers() if multiplayer else []).is_empty():
 		var current_scene = null
 		if network and network.plugin:
 			current_scene = network.plugin.get_editor_interface().get_edited_scene_root()
@@ -284,7 +284,7 @@ func _process(delta):
 			_server_save_timer = 0.0
 			_save_server_tracked_scenes()
 
-	if not network or not network.plugin or not multiplayer.has_multiplayer_peer() or multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
+	if not network or not network.plugin or not multiplayer or not multiplayer.has_multiplayer_peer() or multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
 		return
 
 	_time_since_sync += delta
@@ -468,7 +468,7 @@ func _track_selection():
 
 	if selected_ids != _last_selected_ids:
 		_last_selected_ids = selected_ids
-		rpc("update_peer_selection", multiplayer.get_unique_id(), selected_ids, _last_scene_path)
+		rpc("update_peer_selection", multiplayer.get_unique_id() if multiplayer else 1, selected_ids, _last_scene_path)
 
 @rpc("any_peer", "reliable")
 func update_peer_selection(peer_id: int, selected_ids: Array, scene_path: String = ""):
@@ -562,7 +562,7 @@ func clear_peer_selections(peer_id: int):
 				node.queue_free()
 
 func push_current_scene():
-	if multiplayer.is_server():
+	if multiplayer and multiplayer.is_server():
 		var editor = network.plugin.get_editor_interface()
 		var current_scene = editor.get_edited_scene_root()
 		if current_scene:
@@ -579,7 +579,7 @@ func push_current_scene():
 					rpc("receive_scene", path, randi(), bytes, true)
 
 func push_specific_scene_to_peer(scene_path: String, id: int):
-	if multiplayer.is_server():
+	if multiplayer and multiplayer.is_server():
 		var editor = network.plugin.get_editor_interface()
 		var current_scene = editor.get_edited_scene_root()
 
@@ -636,7 +636,7 @@ func _send_scene_bytes_to_peer(path: String, bytes: PackedByteArray, id: int):
 	rpc_id(id, "receive_scene", path, randi(), bytes, true)
 
 func push_current_scene_to_peer(id: int):
-	if multiplayer.is_server():
+	if multiplayer and multiplayer.is_server():
 		var editor = network.plugin.get_editor_interface()
 		var current_scene = editor.get_edited_scene_root()
 		if current_scene:
@@ -653,7 +653,7 @@ func _on_node_added(node: Node):
 
 	_node_names[node.get_instance_id()] = node.name
 
-	if _ignore_next_structure_event or _is_reloading_scene or not multiplayer.has_multiplayer_peer() or multiplayer.get_peers().is_empty():
+	if _ignore_next_structure_event or _is_reloading_scene or not multiplayer or not multiplayer.has_multiplayer_peer() or (multiplayer.get_peers() if multiplayer else []).is_empty():
 		return
 
 	# Capture owner state before the frame delay.
@@ -812,7 +812,7 @@ func _on_node_removed(node: Node):
 	if id != "" and _last_tracked_properties.has(id):
 		_last_tracked_properties.erase(id)
 
-	if _ignore_next_structure_event or _is_reloading_scene or not multiplayer.has_multiplayer_peer() or multiplayer.get_peers().is_empty() or id == "":
+	if _ignore_next_structure_event or _is_reloading_scene or not multiplayer or not multiplayer.has_multiplayer_peer() or (multiplayer.get_peers() if multiplayer else []).is_empty() or id == "":
 		return
 
 	if id == ".":
@@ -841,7 +841,7 @@ func _on_node_removed(node: Node):
 	rpc("remote_node_removed", id, scene_path)
 
 func _on_node_renamed(node: Node):
-	if _ignore_next_structure_event or _is_reloading_scene or not multiplayer.has_multiplayer_peer() or multiplayer.get_peers().is_empty():
+	if _ignore_next_structure_event or _is_reloading_scene or not multiplayer or not multiplayer.has_multiplayer_peer() or (multiplayer.get_peers() if multiplayer else []).is_empty():
 		return
 
 	var parent = node.get_parent()
@@ -942,10 +942,10 @@ func _send_update_node_property(id: String, prop_name: String, value: Variant, s
 
 @rpc("any_peer", "reliable")
 func update_node_property_chunked(id: String, prop_name: String, transfer_id: int, chunk: PackedByteArray, scene_path: String = "", is_final: bool = true):
-	var sender_id = multiplayer.get_remote_sender_id()
+	var sender_id = multiplayer.get_remote_sender_id() if multiplayer else 0
 
-	if multiplayer.is_server() and sender_id != 0:
-		for peer_id in multiplayer.get_peers():
+	if multiplayer and multiplayer.is_server() and sender_id != 0:
+		for peer_id in multiplayer.get_peers() if multiplayer else []:
 			if peer_id != sender_id:
 				rpc_id(peer_id, "update_node_property_chunked", id, prop_name, transfer_id, chunk, scene_path, is_final)
 
@@ -967,10 +967,10 @@ func update_node_property_chunked(id: String, prop_name: String, transfer_id: in
 
 @rpc("any_peer", "reliable")
 func update_node_property(id: String, prop_name: String, value: Variant, scene_path: String = ""):
-	var sender_id = multiplayer.get_remote_sender_id()
+	var sender_id = multiplayer.get_remote_sender_id() if multiplayer else 0
 
-	if multiplayer.is_server() and sender_id != 0:
-		for peer_id in multiplayer.get_peers():
+	if multiplayer and multiplayer.is_server() and sender_id != 0:
+		for peer_id in multiplayer.get_peers() if multiplayer else []:
 			if peer_id != sender_id:
 				rpc_id(peer_id, "update_node_property", id, prop_name, value, scene_path)
 
@@ -1076,7 +1076,7 @@ func receive_scene(path: String, transfer_id: int, bytes: PackedByteArray, is_fi
 		printerr("Invalid scene path received: ", path)
 		return
 
-	var sender_id = multiplayer.get_remote_sender_id()
+	var sender_id = multiplayer.get_remote_sender_id() if multiplayer else 0
 	var scene_key = str(sender_id) + "_" + str(transfer_id) + "_" + path
 	if not _receiving_scenes.has(scene_key):
 		_receiving_scenes[scene_key] = PackedByteArray()
@@ -1181,7 +1181,7 @@ func request_scene_state(scene_path: String):
 	var current_scene = _get_target_scene(scene_path)
 
 	if current_scene and current_scene.get_meta("scene_file_path", current_scene.scene_file_path) == scene_path:
-		var sender_id = multiplayer.get_remote_sender_id()
+		var sender_id = multiplayer.get_remote_sender_id() if multiplayer else 0
 
 		# Temporarily remove selection outlines so they aren't packed
 		var outlines = []
@@ -1206,7 +1206,7 @@ func request_scene_state(scene_path: String):
 				data["parent"].add_child(data["node"])
 
 		if err == OK:
-			var temp_path = "user://temp_scene_state_" + str(multiplayer.get_unique_id()) + ".tscn"
+			var temp_path = "user://temp_scene_state_" + str(multiplayer.get_unique_id() if multiplayer else 1) + ".tscn"
 			if ResourceSaver.save(packed, temp_path) == OK:
 				network._restore_dummy_paths_in_file(temp_path)
 				if FileAccess.file_exists(temp_path):
@@ -1230,7 +1230,7 @@ func receive_scene_state(path: String, transfer_id: int, bytes: PackedByteArray,
 		printerr("Invalid scene state path received: ", path)
 		return
 
-	var sender_id = multiplayer.get_remote_sender_id()
+	var sender_id = multiplayer.get_remote_sender_id() if multiplayer else 0
 	var state_key = str(sender_id) + "_" + str(transfer_id) + "_" + path
 	if not _receiving_scene_states.has(state_key):
 		_receiving_scene_states[state_key] = PackedByteArray()
@@ -1330,16 +1330,16 @@ func _sync_cursor_throttled(delta):
 	_last_cursor_sync += delta
 	if _last_cursor_sync >= CURSOR_SYNC_INTERVAL:
 		_last_cursor_sync = 0.0
-		if multiplayer.has_multiplayer_peer() and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
+		if multiplayer and multiplayer.has_multiplayer_peer() and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
 			var data = _get_local_cursor_data()
 			if data.has_3d:
 				if data.pos_3d != _local_3d_cursor_pos:
 					_local_3d_cursor_pos = data.pos_3d
-					rpc("update_peer_cursor_3d", multiplayer.get_unique_id(), _local_3d_cursor_pos, _last_scene_path)
+					rpc("update_peer_cursor_3d", multiplayer.get_unique_id() if multiplayer else 1, _local_3d_cursor_pos, _last_scene_path)
 			elif data.has_2d:
 				if data.pos_2d != _local_2d_cursor_pos:
 					_local_2d_cursor_pos = data.pos_2d
-					rpc("update_peer_cursor_2d", multiplayer.get_unique_id(), _local_2d_cursor_pos, _last_scene_path)
+					rpc("update_peer_cursor_2d", multiplayer.get_unique_id() if multiplayer else 1, _local_2d_cursor_pos, _last_scene_path)
 
 
 @rpc("any_peer", "unreliable")
