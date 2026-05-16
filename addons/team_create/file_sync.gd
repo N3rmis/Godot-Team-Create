@@ -1,6 +1,8 @@
 @tool
 extends Node
 
+var _file_write_mutex = Mutex.new()
+
 const SUPPORTED_EXTENSIONS = {"gd": true, "cs": true, "tscn": true, "scn": true, "png": true, "jpg": true, "wav": true, "ogg": true}
 
 var network: Node
@@ -609,10 +611,14 @@ func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_fin
 				network.tc_print("Team Create: Applying received file to open background scene.")
 
 			if bytes.size() > 0:
-				var file = FileAccess.open(path, FileAccess.WRITE)
+				_file_write_mutex.lock()
+				var file = FileAccess.open(path + ".tmp", FileAccess.WRITE)
 				if file:
 					file.store_buffer(bytes)
 					file.close()
+					if DirAccess.remove_absolute(path) == OK or not FileAccess.file_exists(path):
+						DirAccess.rename_absolute(path + ".tmp", path)
+				_file_write_mutex.unlock()
 
 			if is_active:
 				network.scene_sync._is_reloading_scene = true
@@ -655,11 +661,15 @@ func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_fin
 				should_write = false
 
 		if should_write:
-			var file = FileAccess.open(path, FileAccess.WRITE)
+			_file_write_mutex.lock()
+			var file = FileAccess.open(path + ".tmp", FileAccess.WRITE)
 			if file:
 				file.store_buffer(bytes)
 				file.close()
+				if DirAccess.remove_absolute(path) == OK or not FileAccess.file_exists(path):
+					DirAccess.rename_absolute(path + ".tmp", path)
 				network.tc_print("Received and updated file: ", path)
+			_file_write_mutex.unlock()
 		else:
 			network.tc_print("File unchanged, skipped writing: ", path)
 
