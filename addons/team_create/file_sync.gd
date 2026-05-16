@@ -42,13 +42,31 @@ func _process(delta):
 						var bytes = peer.get_data(peer.get_available_bytes())
 						if bytes[0] == OK:
 							_http_buffers[peer].append_array(bytes[1])
-							var req_str = _http_buffers[peer].get_string_from_utf8()
+							var buffer_bytes = _http_buffers[peer]
+							var header_end_idx = -1
+							var header_len = 4
 
-							if "\r\n\r\n" in req_str or "\n\n" in req_str:
+							# Find sequence manually
+							for k in range(buffer_bytes.size() - 3):
+								if buffer_bytes[k] == 13 and buffer_bytes[k+1] == 10 and buffer_bytes[k+2] == 13 and buffer_bytes[k+3] == 10:
+									header_end_idx = k
+									break
+
+							if header_end_idx == -1:
+								for k in range(buffer_bytes.size() - 1):
+									if buffer_bytes[k] == 10 and buffer_bytes[k+1] == 10:
+										header_end_idx = k
+										header_len = 2
+										break
+
+							var req_str = ""
+							if header_end_idx != -1:
+								req_str = buffer_bytes.slice(0, header_end_idx).get_string_from_utf8()
+
 								if req_str.begins_with("GET "):
-									var lines = req_str.split("\n")
-									if lines.size() > 0:
-										var parts = lines[0].split(" ")
+									var lines_arr = req_str.split("\n")
+									if lines_arr.size() > 0:
+										var parts = lines_arr[0].split(" ")
 										if parts.size() > 1:
 											var path = parts[1]
 											path = path.uri_decode()
@@ -66,9 +84,9 @@ func _process(delta):
 												resp["data"].append_array(response_headers.to_utf8_buffer())
 												resp["active"] = true
 								elif req_str.begins_with("POST "):
-									var lines = req_str.split("\n")
-									if lines.size() > 0:
-										var parts = lines[0].split(" ")
+									var lines_arr = req_str.split("\n")
+									if lines_arr.size() > 0:
+										var parts = lines_arr[0].split(" ")
 										if parts.size() > 1:
 											var path = parts[1]
 											path = path.uri_decode()
@@ -77,34 +95,14 @@ func _process(delta):
 
 											if _is_safe_path(path):
 												var content_length = 0
-												for line in lines:
-													var lower_line = line.to_lower()
+												for req_line in lines_arr:
+													var lower_line = req_line.to_lower()
 													if lower_line.begins_with("content-length:"):
 														content_length = lower_line.split(":")[1].strip_edges().to_int()
 														break
 
-												# Find headers end using raw bytes
-												var buffer_bytes = _http_buffers[peer]
-												var sep_crlf = PackedByteArray([13, 10, 13, 10])
-												var sep_lf = PackedByteArray([10, 10])
-												var header_end_idx = -1
-												var header_len = 4
-
-												# Find sequence manually
-												for k in range(buffer_bytes.size() - 3):
-													if buffer_bytes[k] == 13 and buffer_bytes[k+1] == 10 and buffer_bytes[k+2] == 13 and buffer_bytes[k+3] == 10:
-														header_end_idx = k
-														break
-
-												if header_end_idx == -1:
-													for k in range(buffer_bytes.size() - 1):
-														if buffer_bytes[k] == 10 and buffer_bytes[k+1] == 10:
-															header_end_idx = k
-															header_len = 2
-															break
-
-												if header_end_idx != -1 and _http_buffers[peer].size() >= header_end_idx + header_len + content_length:
-													var body_bytes = _http_buffers[peer].slice(header_end_idx + header_len, header_end_idx + header_len + content_length)
+												if buffer_bytes.size() >= header_end_idx + header_len + content_length:
+													var body_bytes = buffer_bytes.slice(header_end_idx + header_len, header_end_idx + header_len + content_length)
 
 													# receive_file will handle dir creation and writing
 													receive_file(path, randi(), body_bytes, true)
@@ -113,14 +111,18 @@ func _process(delta):
 													resp["data"].append_array(response_headers.to_utf8_buffer())
 													resp["active"] = true
 
-								if not resp["active"]:
-									# Check if it's a POST waiting for more body data
-									if req_str.begins_with("POST "):
-										continue
-									peer.disconnect_from_host()
-									_http_clients.remove_at(i)
-									_http_buffers.erase(peer)
-									_http_responses.erase(peer)
+							if not resp["active"]:
+								if header_end_idx == -1:
+									var check_len = min(buffer_bytes.size(), 2048)
+									req_str = buffer_bytes.slice(0, check_len).get_string_from_ascii()
+
+								# Check if it's a POST waiting for more body data
+								if req_str.begins_with("POST "):
+									continue
+								peer.disconnect_from_host()
+								_http_clients.remove_at(i)
+								_http_buffers.erase(peer)
+								_http_responses.erase(peer)
 				else:
 					# Active response, send in chunks asynchronously
 					var to_send = resp["data"].size() - resp["sent"]
