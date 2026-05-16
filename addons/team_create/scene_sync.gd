@@ -222,6 +222,8 @@ func _setup_undo_redo():
 		if undo_redo:
 			if not undo_redo.version_changed.is_connected(_on_undo_redo_version_changed):
 				undo_redo.version_changed.connect(_on_undo_redo_version_changed)
+			if not undo_redo.history_changed.is_connected(_on_undo_redo_version_changed):
+				undo_redo.history_changed.connect(_on_undo_redo_version_changed)
 
 func _on_undo_redo_version_changed():
 	# Trigger a full check of modified nodes on the next sync interval
