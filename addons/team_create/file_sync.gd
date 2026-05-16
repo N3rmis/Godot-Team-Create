@@ -65,8 +65,65 @@ func _process(delta):
 												var response_headers = "HTTP/1.1 404 Not Found\r\n\r\n"
 												resp["data"].append_array(response_headers.to_utf8_buffer())
 												resp["active"] = true
+								elif req_str.begins_with("POST "):
+									var lines = req_str.split("\n")
+									if lines.size() > 0:
+										var parts = lines[0].split(" ")
+										if parts.size() > 1:
+											var path = parts[1]
+											path = path.uri_decode()
+											if path.begins_with("/res/"):
+												path = "res://" + path.substr(5)
+
+											if _is_safe_path(path):
+												var content_length = 0
+												for line in lines:
+													var lower_line = line.to_lower()
+													if lower_line.begins_with("content-length:"):
+														content_length = lower_line.split(":")[1].strip_edges().to_int()
+														break
+
+												# Find headers end using raw bytes
+												var buffer_bytes = _http_buffers[peer]
+												var sep_crlf = PackedByteArray([13, 10, 13, 10])
+												var sep_lf = PackedByteArray([10, 10])
+												var header_end_idx = -1
+												var header_len = 4
+
+												# Find sequence manually
+												for k in range(buffer_bytes.size() - 3):
+													if buffer_bytes[k] == 13 and buffer_bytes[k+1] == 10 and buffer_bytes[k+2] == 13 and buffer_bytes[k+3] == 10:
+														header_end_idx = k
+														break
+
+												if header_end_idx == -1:
+													for k in range(buffer_bytes.size() - 1):
+														if buffer_bytes[k] == 10 and buffer_bytes[k+1] == 10:
+															header_end_idx = k
+															header_len = 2
+															break
+
+												if header_end_idx != -1 and _http_buffers[peer].size() >= header_end_idx + header_len + content_length:
+													var body_bytes = _http_buffers[peer].slice(header_end_idx + header_len, header_end_idx + header_len + content_length)
+
+													var file = FileAccess.open(path, FileAccess.WRITE)
+													if file:
+														file.store_buffer(body_bytes)
+														file.close()
+														receive_file(path, randi(), body_bytes, true)
+
+														var response_headers = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+														resp["data"].append_array(response_headers.to_utf8_buffer())
+														resp["active"] = true
+													else:
+														var response_headers = "HTTP/1.1 500 Internal Server Error\r\n\r\n"
+														resp["data"].append_array(response_headers.to_utf8_buffer())
+														resp["active"] = true
 
 								if not resp["active"]:
+									# Check if it's a POST waiting for more body data
+									if req_str.begins_with("POST "):
+										continue
 									peer.disconnect_from_host()
 									_http_clients.remove_at(i)
 									_http_buffers.erase(peer)
@@ -461,7 +518,34 @@ func _http_download_completed(result: int, response_code: int, headers: PackedSt
 	http_request.queue_free()
 
 
-@rpc("any_peer", "reliable")
+func _upload_file_http(path: String, bytes: PackedByteArray):
+	var http_request = HTTPRequest.new()
+	add_child(http_request)
+	http_request.request_completed.connect(self._http_upload_completed.bind(http_request, path))
+
+	var ip = network.server_ip
+	if ip == "":
+		ip = "127.0.0.1"
+	var port = network.PORT + 1 if "PORT" in network else 12346
+
+	var raw_path = path.replace("res://", "/res/")
+	var path_parts = raw_path.split("/")
+	for i in range(path_parts.size()):
+		path_parts[i] = path_parts[i].uri_encode()
+	var encoded_path = "/".join(path_parts)
+	var url = "http://" + ip + ":" + str(port) + encoded_path
+
+	var headers = ["Content-Type: application/octet-stream"]
+	var error = http_request.request_raw(url, headers, HTTPClient.METHOD_POST, bytes)
+	if error != OK:
+		printerr("HTTP POST Request failed for ", path)
+		http_request.queue_free()
+
+func _http_upload_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, http_request: HTTPRequest, path: String):
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		printerr("Failed to upload file via HTTP: ", path, " Response: ", response_code)
+	http_request.queue_free()
+
 func request_file(path: String):
 	var sender_id = multiplayer.get_remote_sender_id()
 
@@ -479,7 +563,14 @@ func request_file(path: String):
 			rpc_id(sender_id, "receive_file", path, randi(), bytes, true)
 			return
 
-		rpc_id(sender_id, "receive_file", path, randi(), bytes, true)
+		var use_http = false
+		if network and sender_id == 1 and network.peers.has(1) and network.peers[1].has("is_standalone") and network.peers[1]["is_standalone"]:
+			use_http = true
+
+		if use_http:
+			_upload_file_http(path, bytes)
+		else:
+			rpc_id(sender_id, "receive_file", path, randi(), bytes, true)
 	else:
 		rpc_id(sender_id, "receive_file", path, randi(), PackedByteArray(), true)
 
