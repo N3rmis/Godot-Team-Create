@@ -146,6 +146,7 @@ func _refresh_messages(scroll_to_bottom: bool = false):
 		call_deferred("_scroll_to_bottom")
 
 func _scroll_to_bottom():
+	await get_tree().process_frame
 	var scrollbar = scroll_container.get_v_scroll_bar()
 	scrollbar.value = scrollbar.max_value
 
@@ -161,12 +162,14 @@ func _create_message_node(m: Dictionary, is_pinned: bool) -> Control:
 
 	var mcontainer = MarginContainer.new()
 	mcontainer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mcontainer.mouse_filter = Control.MOUSE_FILTER_PASS
 
 	var rtl = RichTextLabel.new()
 	rtl.bbcode_enabled = true
 	rtl.fit_content = true
 	rtl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rtl.selection_enabled = true
+	rtl.mouse_filter = Control.MOUSE_FILTER_PASS
 
 	var sender_name = m.get("sender_name", "Unknown")
 	var color = m.get("sender_color", "ffffff")
