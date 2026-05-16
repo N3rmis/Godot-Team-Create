@@ -1,5 +1,7 @@
 @tool
 extends Node
+
+var _file_write_mutex = Mutex.new()
 # TODO: Evaluate replacing manual dictionary serialization with Godot's built-in MultiplayerSynchronizer
 
 var network: Node
@@ -141,6 +143,7 @@ func _get_target_scene(scene_path: String) -> Node:
 		return current_scene
 
 func _save_server_tracked_scenes():
+	return
 	if not network.get("is_standalone_server"):
 		return
 
@@ -240,6 +243,12 @@ func _connect_tree_exiting_recursive(node: Node):
 		_connect_tree_exiting_recursive(child)
 
 func _on_node_tree_exiting(node: Node):
+	if network and network.plugin:
+		var edited_scene = network.plugin.get_editor_interface().get_edited_scene_root()
+		var current_scene = _get_target_scene("")
+		if node == edited_scene or current_scene != edited_scene:
+			return
+
 	if multiplayer.has_multiplayer_peer() and not multiplayer.get_peers().is_empty():
 		var current_scene = null
 		if network and network.plugin:
@@ -867,7 +876,10 @@ func remote_node_added(parent_id: String, type: String, new_name: String, new_id
 				if new_node:
 					new_node.name = new_name
 					parent.add_child(new_node)
-					new_node.owner = current_scene # Important for saving in scene
+					if parent.owner and parent.owner != current_scene and parent.scene_file_path == "":
+						new_node.owner = parent.owner
+					else:
+						new_node.owner = current_scene
 					_node_names[new_node.get_instance_id()] = new_name
 	_ignore_next_structure_event = false
 
@@ -1081,10 +1093,14 @@ func receive_scene(path: String, transfer_id: int, bytes: PackedByteArray, is_fi
 	if network and network.plugin:
 		if network.get("is_standalone_server"):
 			if bytes.size() > 0:
-				var file = FileAccess.open(path, FileAccess.WRITE)
+				_file_write_mutex.lock()
+				var file = FileAccess.open(path + ".tmp", FileAccess.WRITE)
 				if file:
 					file.store_buffer(bytes)
 					file.close()
+					if DirAccess.remove_absolute(path) == OK or not FileAccess.file_exists(path):
+						DirAccess.rename_absolute(path + ".tmp", path)
+				_file_write_mutex.unlock()
 
 			if _server_tracked_scenes.has(path):
 				var s = _server_tracked_scenes[path]
@@ -1116,10 +1132,14 @@ func receive_scene(path: String, transfer_id: int, bytes: PackedByteArray, is_fi
 			if is_active:
 				# 1. Write to disk and force reload
 				if bytes.size() > 0:
-					var file = FileAccess.open(path, FileAccess.WRITE)
+					_file_write_mutex.lock()
+					var file = FileAccess.open(path + ".tmp", FileAccess.WRITE)
 					if file:
 						file.store_buffer(bytes)
 						file.close()
+						if DirAccess.remove_absolute(path) == OK or not FileAccess.file_exists(path):
+							DirAccess.rename_absolute(path + ".tmp", path)
+					_file_write_mutex.unlock()
 				_is_reloading_scene = true
 				_force_full_sync_next_frame = true
 
@@ -1143,11 +1163,15 @@ func receive_scene(path: String, transfer_id: int, bytes: PackedByteArray, is_fi
 				network.tc_print("Team Create: Closed updated background scene tab: ", path)
 
 	if bytes.size() > 0:
-		var file = FileAccess.open(path, FileAccess.WRITE)
+		_file_write_mutex.lock()
+		var file = FileAccess.open(path + ".tmp", FileAccess.WRITE)
 		if file:
 			file.store_buffer(bytes)
 			file.close()
+			if DirAccess.remove_absolute(path) == OK or not FileAccess.file_exists(path):
+				DirAccess.rename_absolute(path + ".tmp", path)
 			network.tc_print("Received scene: ", path)
+		_file_write_mutex.unlock()
 
 @rpc("any_peer", "reliable")
 func request_scene_state(scene_path: String):
@@ -1221,11 +1245,15 @@ func receive_scene_state(path: String, transfer_id: int, bytes: PackedByteArray,
 	bytes = full_bytes
 
 	if bytes.size() > 0:
-		var file = FileAccess.open(path, FileAccess.WRITE)
+		_file_write_mutex.lock()
+		var file = FileAccess.open(path + ".tmp", FileAccess.WRITE)
 		if file:
 			file.store_buffer(bytes)
 			file.close()
+			if DirAccess.remove_absolute(path) == OK or not FileAccess.file_exists(path):
+				DirAccess.rename_absolute(path + ".tmp", path)
 			network.tc_print("Team Create: Received up-to-date scene state for ", path)
+		_file_write_mutex.unlock()
 
 		if network and network.plugin:
 			if network.get("is_standalone_server"):
