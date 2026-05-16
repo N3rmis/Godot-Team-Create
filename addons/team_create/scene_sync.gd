@@ -315,7 +315,7 @@ func _process(delta):
 				should_continue = true
 			elif network and network.file_sync and pending.value in network.file_sync.downloading_files:
 				should_continue = true
-			elif ResourceLoader.exists(pending.value):
+			elif _safe_resource_exists(pending.value):
 				is_ready = true
 		elif typeof(pending.value) == TYPE_DICTIONARY and pending.value.has("sub_resource_bytes"):
 			is_ready = true
@@ -331,7 +331,7 @@ func _process(delta):
 							should_continue = true
 							is_ready = false
 							break
-						if not ResourceLoader.exists(ext_path):
+						if not _safe_resource_exists(ext_path):
 							is_ready = false
 							break
 
@@ -1022,7 +1022,8 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 					is_scanning = network.plugin.get_editor_interface().get_resource_filesystem().is_scanning()
 
 				var res = null
-				if not is_downloading and not is_scanning and ResourceLoader.exists(value):
+				var safe_exists = _safe_resource_exists(value)
+				if not is_downloading and not is_scanning and safe_exists:
 					res = load(value)
 
 				if res:
@@ -1054,7 +1055,7 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 							if network and network.file_sync and ext_path in network.file_sync.downloading_files:
 								is_ready = false
 								break
-							if not ResourceLoader.exists(ext_path):
+							if not _safe_resource_exists(ext_path):
 								is_ready = false
 								break
 
@@ -1637,3 +1638,16 @@ func _apply_connections(node: Node, connections_data: Array, current_scene: Node
 			if c_data.has("unbinds") and c_data["unbinds"] > 0:
 				callable = callable.unbind(c_data["unbinds"])
 			node.connect(c_data["signal"], callable, c_data["flags"])
+
+func _safe_resource_exists(path: String) -> bool:
+	if not ResourceLoader.exists(path):
+		return false
+	var import_path = path + ".import"
+	if FileAccess.file_exists(import_path):
+		var config = ConfigFile.new()
+		if config.load(import_path) == OK:
+			var dest_files = config.get_value("deps", "dest_files", [])
+			for dest_file in dest_files:
+				if not FileAccess.file_exists(dest_file):
+					return false
+	return true
