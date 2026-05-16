@@ -38,7 +38,7 @@ var max_file_size: int = 0
 
 var chat_history = []
 var chat_id_counter = 0
-const CHAT_HISTORY_FILE = "res://addons/team_create/team_chat_history.json"
+const CHAT_HISTORY_FILE = "user://team_chat_history.json"
 
 
 func tc_print(msg: String, arg1="", arg2="", arg3=""):
@@ -877,6 +877,7 @@ func _add_message_to_local_ui(msg: Dictionary):
 func sync_chat_history(history: Array):
 	if multiplayer.get_remote_sender_id() != 1: return
 	chat_history = history
+	_save_chat_history()
 	_update_local_chat_ui()
 
 func send_chat_message(text: String, image_path: String = ""):
@@ -957,6 +958,7 @@ func receive_chat_message(msg: Dictionary):
 	# Client-side: if we didn't add it ourselves (we aren't server), append it
 	if not is_server:
 		chat_history.append(msg)
+		_save_chat_history()
 
 	_add_message_to_local_ui(msg)
 
