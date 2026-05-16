@@ -546,6 +546,7 @@ func _http_upload_completed(result: int, response_code: int, headers: PackedStri
 		printerr("Failed to upload file via HTTP: ", path, " Response: ", response_code)
 	http_request.queue_free()
 
+@rpc("any_peer", "reliable")
 func request_file(path: String):
 	var sender_id = multiplayer.get_remote_sender_id()
 
