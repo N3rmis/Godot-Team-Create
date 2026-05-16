@@ -494,6 +494,11 @@ func disconnect_peer():
 		peer.close()
 	if scene_sync:
 		scene_sync.clear_all_peer_indicators()
+		scene_sync._last_scene_path = ""
+		scene_sync._last_tracked_properties.clear()
+		scene_sync._node_names.clear()
+		scene_sync._pre_removal_paths.clear()
+		scene_sync._last_selected_ids.clear()
 	multiplayer.multiplayer_peer = null
 	peers.clear()
 	_color_assignment_counter = 0

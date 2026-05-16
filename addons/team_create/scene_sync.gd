@@ -642,9 +642,34 @@ func push_current_scene_to_peer(id: int):
 		if current_scene:
 			var path = current_scene.scene_file_path
 			if path != "":
-				if FileAccess.file_exists(path):
-					var bytes = FileAccess.get_file_as_bytes(path)
-					_send_scene_bytes_to_peer(path, bytes, id)
+				var outlines = []
+				var tree = current_scene.get_tree()
+				if tree:
+					for node in tree.get_nodes_in_group("TeamCreateSelectionOutlines"):
+						if is_instance_valid(node):
+							outlines.append({"node": node, "parent": node.get_parent()})
+					for node in tree.get_nodes_in_group("TeamCreateCursors"):
+						if is_instance_valid(node):
+							outlines.append({"node": node, "parent": node.get_parent()})
+
+				for data in outlines:
+					data["parent"].remove_child(data["node"])
+
+				var packed = PackedScene.new()
+				var err = packed.pack(current_scene)
+
+				for data in outlines:
+					if is_instance_valid(data["parent"]) and is_instance_valid(data["node"]):
+						data["parent"].add_child(data["node"])
+
+				if err == OK:
+					var temp_path = "user://temp_scene_state_" + str(multiplayer.get_unique_id() if multiplayer else 1) + ".tscn"
+					if ResourceSaver.save(packed, temp_path) == OK:
+						network._restore_dummy_paths_in_file(temp_path)
+						if FileAccess.file_exists(temp_path):
+							var bytes = FileAccess.get_file_as_bytes(temp_path)
+							_send_scene_bytes_to_peer(path, bytes, id)
+						DirAccess.remove_absolute(temp_path)
 
 func _on_node_added(node: Node):
 	# Connect for tracking before removal
