@@ -331,6 +331,32 @@ func _check_all_nodes(node: Node, scene_root: Node):
 	for child in node.get_children():
 		_check_all_nodes(child, scene_root)
 
+
+func _is_variant_different(a: Variant, b: Variant) -> bool:
+	if typeof(a) != typeof(b):
+		return true
+	if typeof(a) == TYPE_DICTIONARY:
+		if a.size() != b.size():
+			return true
+		for k in a:
+			if not b.has(k):
+				return true
+			if _is_variant_different(a[k], b[k]):
+				return true
+		return false
+	if typeof(a) >= TYPE_ARRAY and typeof(a) <= TYPE_PACKED_COLOR_ARRAY: # Array types
+		if a.size() != b.size():
+			return true
+		for i in range(a.size()):
+			if _is_variant_different(a[i], b[i]):
+				return true
+		return false
+	# Godot 4 object comparison by value fallback. Usually handled by Godot's == but some types like resources
+	# might need checking if properties differ if we wanted to be super deep.
+	# We rely on '!=' for remaining primitives. For Objects (Resources) Godot will do reference check via !=.
+	# Since TeamCreate exports properties to byte arrays inside the Dictionary for inline resources, this works.
+	return a != b
+
 func _check_single_node_changes(node: Node):
 	var id = network.assign_unique_id(node)
 
@@ -384,7 +410,7 @@ func _check_single_node_changes(node: Node):
 	else:
 		var last_props = _last_tracked_properties[id]
 		for prop_name in current_props:
-			if not last_props.has(prop_name) or last_props[prop_name] != current_props[prop_name]:
+			if not last_props.has(prop_name) or _is_variant_different(last_props[prop_name], current_props[prop_name]):
 				_send_update_node_property(id, prop_name, current_props[prop_name], _last_scene_path)
 				last_props[prop_name] = current_props[prop_name]
 
@@ -663,15 +689,7 @@ func _sync_all_node_properties(node: Node, id: String):
 			var default_val = default_node.get(p.name)
 
 			# Check if the property differs from the default value
-			var is_different = false
-			if typeof(val) != typeof(default_val):
-				is_different = true
-			elif typeof(val) == TYPE_OBJECT:
-				if val != default_val and val != null:
-					is_different = true
-			else:
-				if val != default_val:
-					is_different = true
+			var is_different = _is_variant_different(val, default_val)
 
 			if is_different:
 				if typeof(val) == TYPE_OBJECT:
