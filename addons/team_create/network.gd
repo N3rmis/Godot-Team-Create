@@ -167,7 +167,7 @@ func _process_console_command(input: String):
 				"sender_name": "Server",
 				"sender_color": "FFA500",
 				"pinned": false,
-				"text": "[color=#FFA500]" + msg_text + "[/color]"
+				"text": msg_text
 			}
 			chat_id_counter += 1
 			chat_history.append(msg)
