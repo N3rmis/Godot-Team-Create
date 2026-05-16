@@ -454,7 +454,7 @@ func _check_single_node_changes(node: Node):
 	else:
 		var last_props = _last_tracked_properties[id]
 		for prop_name in current_props:
-			if not last_props.has(prop_name) or last_props[prop_name] != current_props[prop_name]:
+			if not last_props.has(prop_name) or typeof(last_props[prop_name]) != typeof(current_props[prop_name]) or last_props[prop_name] != current_props[prop_name]:
 				_send_update_node_property(id, prop_name, current_props[prop_name], _last_scene_path)
 				last_props[prop_name] = current_props[prop_name]
 
