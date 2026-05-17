@@ -198,3 +198,20 @@ func _extract_and_apply_update(zip_path: String) -> void:
 	else:
 		var editor_interface = get_editor_interface()
 		editor_interface.restart_editor()
+
+func _force_close_all_scenes() -> void:
+	var editor = get_editor_interface()
+	var base_control = editor.get_base_control()
+	var scene_tabs: TabBar = null
+
+	var nodes_to_check = [base_control]
+	while not nodes_to_check.is_empty():
+		var current = nodes_to_check.pop_front()
+		if current is TabBar and current.get_parent() is VBoxContainer and current.get_parent().get_parent() is MarginContainer:
+			scene_tabs = current
+			break
+		nodes_to_check.append_array(current.get_children())
+
+	if scene_tabs:
+		for i in range(scene_tabs.get_tab_count() - 1, -1, -1):
+			scene_tabs.emit_signal("tab_close_pressed", i)
