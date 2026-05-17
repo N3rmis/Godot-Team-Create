@@ -129,13 +129,16 @@ class DummyEditorPlugin extends Node:
 					printerr("Security Warning: Traversal attempt detected in update zip: ", f)
 					continue
 
+				var global_dest = ProjectSettings.globalize_path(dest_path)
+
 				# Ensure directory exists
-				var dest_dir = dest_path.get_base_dir()
+				var dest_dir = global_dest.get_base_dir()
 				if not DirAccess.dir_exists_absolute(dest_dir):
 					DirAccess.make_dir_recursive_absolute(dest_dir)
 
 				var content = zip_reader.read_file(f)
-				var out_file = FileAccess.open(dest_path, FileAccess.WRITE)
+				DirAccess.remove_absolute(global_dest)
+				var out_file = FileAccess.open(global_dest, FileAccess.WRITE)
 				if out_file:
 					out_file.store_buffer(content)
 					out_file.close()
