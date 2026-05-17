@@ -348,24 +348,17 @@ func _process(delta):
 						if res:
 							node.set(pending.prop_name, res)
 					elif typeof(pending.value) == TYPE_DICTIONARY:
-						var res = bytes_to_var_with_objects(pending.value["sub_resource_bytes"])
+						var temp_path = "user://tc_sync_import_" + str(pending.value.hash()) + ".tres"
+						var file = FileAccess.open(temp_path, FileAccess.WRITE)
+						if file:
+							file.store_buffer(pending.value["sub_resource_bytes"])
+							file.close()
+						var res = load(temp_path)
+						DirAccess.remove_absolute(temp_path)
 						if res is Resource:
 							var path = pending.value.get("resource_path", "")
 							if path != "":
-								var existing_res = null
-								if ResourceLoader.has_cached(path):
-									existing_res = load(path)
-								if existing_res and existing_res.get_class() == res.get_class():
-									var props = res.get_property_list()
-									for p in props:
-										var p_name = p.name
-										if p.usage & PROPERTY_USAGE_STORAGE or p.usage & PROPERTY_USAGE_EDITOR:
-											if p_name != "resource_path" and p_name != "resource_local_to_scene" and p_name != "resource_name":
-												existing_res.set(p_name, res.get(p_name))
-									existing_res.emit_signal("changed")
-									res = existing_res
-								else:
-									res.take_over_path(path)
+								res.take_over_path(path)
 							node.set(pending.prop_name, res)
 			_pending_resource_properties.remove_at(i)
 		else:
@@ -420,14 +413,34 @@ func _check_single_node_changes(node: Node):
 						current_props[p.name] = val.resource_path
 					else:
 						# Serialize local sub-resources or resources without a file path
-						var bytes = var_to_bytes_with_objects(val)
-						var temp_path = "user://tc_sync_export_" + str(val.get_instance_id()) + ".tres"
-						ResourceSaver.save(val, temp_path)
-						var text = ""
-						if FileAccess.file_exists(temp_path):
-							text = FileAccess.get_file_as_string(temp_path)
-							DirAccess.remove_absolute(temp_path)
-						current_props[p.name] = {"sub_resource_bytes": bytes, "sub_resource_text": text, "resource_path": val.resource_path}
+						# Only serialize if it has changed
+						var force_res_update = false
+						if _last_tracked_properties.has(id) and _last_tracked_properties[id].has(p.name):
+							var last_val = _last_tracked_properties[id][p.name]
+							if typeof(last_val) == TYPE_DICTIONARY and last_val.has("resource_instance_id"):
+								if last_val["resource_instance_id"] != val.get_instance_id():
+									force_res_update = true
+							else:
+								force_res_update = true
+						else:
+							force_res_update = true
+
+						# Listen for native changed signal
+						if not val.is_connected("changed", _on_resource_changed.bind(node, p.name, val)):
+							val.connect("changed", _on_resource_changed.bind(node, p.name, val))
+
+						if force_res_update:
+							var temp_path = "user://tc_sync_export_" + str(val.get_instance_id()) + ".tres"
+							ResourceSaver.save(val, temp_path)
+							var bytes = PackedByteArray()
+							var text = ""
+							if FileAccess.file_exists(temp_path):
+								bytes = FileAccess.get_file_as_bytes(temp_path)
+								text = FileAccess.get_file_as_string(temp_path)
+								DirAccess.remove_absolute(temp_path)
+							current_props[p.name] = {"sub_resource_bytes": bytes, "sub_resource_text": text, "resource_path": val.resource_path, "resource_instance_id": val.get_instance_id()}
+						else:
+							current_props[p.name] = _last_tracked_properties[id][p.name]
 			else:
 				current_props[p.name] = val
 
@@ -772,14 +785,18 @@ func _sync_all_node_properties(node: Node, id: String):
 			if is_different:
 				if typeof(val) == TYPE_OBJECT:
 					if val is Resource:
-						var bytes = var_to_bytes_with_objects(val)
+						if not val.is_connected("changed", _on_resource_changed.bind(node, p.name, val)):
+							val.connect("changed", _on_resource_changed.bind(node, p.name, val))
+
 						var temp_path = "user://tc_sync_export_" + str(val.get_instance_id()) + ".tres"
 						ResourceSaver.save(val, temp_path)
+						var bytes = PackedByteArray()
 						var text = ""
 						if FileAccess.file_exists(temp_path):
+							bytes = FileAccess.get_file_as_bytes(temp_path)
 							text = FileAccess.get_file_as_string(temp_path)
 							DirAccess.remove_absolute(temp_path)
-						current_props[p.name] = {"sub_resource_bytes": bytes, "sub_resource_text": text, "resource_path": val.resource_path}
+						current_props[p.name] = {"sub_resource_bytes": bytes, "sub_resource_text": text, "resource_path": val.resource_path, "resource_instance_id": val.get_instance_id()}
 				else:
 					current_props[p.name] = val
 
@@ -1061,26 +1078,17 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 								break
 
 				if is_ready:
-					var res = bytes_to_var_with_objects(value["sub_resource_bytes"])
+					var temp_path = "user://tc_sync_import_" + str(value.hash()) + ".tres"
+					var file = FileAccess.open(temp_path, FileAccess.WRITE)
+					if file:
+						file.store_buffer(value["sub_resource_bytes"])
+						file.close()
+					var res = load(temp_path)
+					DirAccess.remove_absolute(temp_path)
 					if res is Resource:
 						var path = value.get("resource_path", "")
 						if path != "":
-							var existing_res = null
-							if ResourceLoader.has_cached(path):
-								existing_res = load(path)
-
-							if existing_res and existing_res.get_class() == res.get_class():
-								# Copy properties to the existing shared resource
-								var props = res.get_property_list()
-								for p in props:
-									var p_name = p.name
-									if p.usage & PROPERTY_USAGE_STORAGE or p.usage & PROPERTY_USAGE_EDITOR:
-										if p_name != "resource_path" and p_name != "resource_local_to_scene" and p_name != "resource_name":
-											existing_res.set(p_name, res.get(p_name))
-								existing_res.emit_signal("changed")
-								res = existing_res
-							else:
-								res.take_over_path(path)
+							res.take_over_path(path)
 
 						node.set(prop_name, res)
 				else:
@@ -1653,3 +1661,11 @@ func _safe_resource_exists(path: String) -> bool:
 				if not FileAccess.file_exists(dest_file):
 					return false
 	return true
+
+func _on_resource_changed(node: Node, prop_name: String, res: Resource):
+	if not is_instance_valid(node):
+		return
+	var id = network.assign_unique_id(node)
+	# Force re-serialization of this resource next frame
+	if _last_tracked_properties.has(id) and _last_tracked_properties[id].has(prop_name):
+		_last_tracked_properties[id].erase(prop_name)
