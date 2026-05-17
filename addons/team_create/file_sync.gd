@@ -361,14 +361,19 @@ func get_all_files(dir_path: String, exclude_dirs: Array = []) -> Array:
 			if dir.current_is_dir():
 				var sub_dir = dir_path.path_join(file_name)
 				if sub_dir == "res://.godot":
-					pass # Completely exclude the res://.godot/ folder entirely
+					files.append_array(get_all_files(sub_dir, exclude_dirs))
+				elif sub_dir.begins_with("res://.godot/") and not sub_dir.begins_with("res://.godot/imported"):
+					pass # Exclude other .godot cache folders
 				elif not file_name.begins_with("."):
 					if not exclude_dirs.has(sub_dir):
 						files.append_array(get_all_files(sub_dir, exclude_dirs))
 			elif not dir.current_is_dir() and not file_name.begins_with("."):
+				var full_path = dir_path.path_join(file_name)
+				if full_path.begins_with("res://.godot/") and not full_path.begins_with("res://.godot/imported/"):
+					file_name = dir.get_next()
+					continue
 
 				# Convert local .tmp files to real assets instantly, as requested.
-				var full_path = dir_path.path_join(file_name)
 				if file_name.ends_with(".tmp"):
 					# Strip the .tmp extension to get the original desired filename
 					# (e.g. script.gd.tmp -> script.gd, not script.gd.res)
