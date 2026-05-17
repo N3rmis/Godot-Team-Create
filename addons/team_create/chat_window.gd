@@ -26,6 +26,7 @@ var pinned_vbox: VBoxContainer
 var scroll_container: ScrollContainer
 var input_edit: LineEdit
 var send_btn: Button
+var jump_to_bottom_btn: Button
 
 var messages_data = [] # Array of dictionaries
 var current_display_count = 20
@@ -50,11 +51,24 @@ func _init():
 	drop_target.add_child(main_vbox)
 
 	# Scroll container for chat
+	var scroll_overlay = MarginContainer.new()
+	scroll_overlay.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll_overlay.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main_vbox.add_child(scroll_overlay)
+
 	scroll_container = ScrollContainer.new()
 	scroll_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	main_vbox.add_child(scroll_container)
+	scroll_overlay.add_child(scroll_container)
+
+	jump_to_bottom_btn = Button.new()
+	jump_to_bottom_btn.text = "V"
+	jump_to_bottom_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
+	jump_to_bottom_btn.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	jump_to_bottom_btn.pressed.connect(_on_jump_to_bottom_pressed)
+	jump_to_bottom_btn.hide()
+	scroll_overlay.add_child(jump_to_bottom_btn)
 
 	message_vbox = VBoxContainer.new()
 	message_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -107,15 +121,28 @@ func _on_send_pressed():
 			network.send_chat_message(text, "")
 		input_edit.text = ""
 
+func _on_jump_to_bottom_pressed():
+	var scrollbar = scroll_container.get_v_scroll_bar()
+	scrollbar.value = scrollbar.max_value
+
 func _on_scroll_changed(value: float):
 	if value <= 0 and current_display_count < messages_data.size():
 		current_display_count += 20
 		_refresh_messages(false)
 
+	var scrollbar = scroll_container.get_v_scroll_bar()
+	if value >= scrollbar.max_value - scrollbar.page - 1.0:
+		jump_to_bottom_btn.hide()
+	else:
+		jump_to_bottom_btn.show()
+
 func add_message(msg_data: Dictionary):
+	var scrollbar = scroll_container.get_v_scroll_bar()
+	var is_at_bottom = scrollbar.value >= scrollbar.max_value - scrollbar.page - 1.0
+
 	if not messages_data.has(msg_data):
 		messages_data.append(msg_data)
-	_refresh_messages(true)
+	_refresh_messages(is_at_bottom)
 
 func set_messages(history: Array):
 	messages_data = history
