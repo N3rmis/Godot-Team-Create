@@ -450,6 +450,10 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 	for path in peer_hashes:
 		if path == "res://project.godot":
 			continue
+
+		if path.begins_with("res://.godot/imported/") and local_hashes.has(path):
+			continue
+
 		if not local_hashes.has(path) or local_hashes[path] != peer_hashes[path]:
 			files_to_request.append(path)
 
