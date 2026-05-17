@@ -487,6 +487,8 @@ func join_server(ip: String):
 	multiplayer.multiplayer_peer = peer
 	is_server = false
 	_add_peer(multiplayer.get_unique_id())
+	if plugin:
+		plugin._force_close_all_scenes()
 
 func disconnect_peer():
 	var was_connected = multiplayer.multiplayer_peer != null
