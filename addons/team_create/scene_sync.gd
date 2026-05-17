@@ -362,6 +362,7 @@ func _process(delta):
 										if p.usage & PROPERTY_USAGE_STORAGE or p.usage & PROPERTY_USAGE_EDITOR:
 											if p_name != "resource_path" and p_name != "resource_local_to_scene" and p_name != "resource_name":
 												existing_res.set(p_name, res.get(p_name))
+									existing_res.emit_signal("changed")
 									res = existing_res
 								else:
 									res.take_over_path(path)
@@ -1076,13 +1077,14 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 									if p.usage & PROPERTY_USAGE_STORAGE or p.usage & PROPERTY_USAGE_EDITOR:
 										if p_name != "resource_path" and p_name != "resource_local_to_scene" and p_name != "resource_name":
 											existing_res.set(p_name, res.get(p_name))
+								existing_res.emit_signal("changed")
 								res = existing_res
 							else:
 								res.take_over_path(path)
 
 						node.set(prop_name, res)
 				else:
-					_pending_resource_properties.append({"id": id, "prop_name": prop_name, "value": value, "scene_path": scene_path, "retries": 100})
+					_pending_resource_properties.append({"id": id, "prop_name": prop_name, "value": value, "scene_path": scene_path, "timeout": Time.get_ticks_msec() + 15000})
 			elif prop_name == "__connections__":
 				_apply_connections(node, value, current_scene)
 			else:
