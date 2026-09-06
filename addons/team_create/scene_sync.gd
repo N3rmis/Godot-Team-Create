@@ -521,18 +521,19 @@ func _process_pending_resource_properties():
 							node.set(pending.prop_name, res)
 					elif typeof(pending.value) == TYPE_DICTIONARY and pending.value.has("sub_resource_bytes"):
 						var subres_id = pending.value.get("sub_resource_id", "")
+						var target_uid = pending.value.get("scene_unique_id", "")
+						if target_uid == "":
+							target_uid = _clean_unique_id(subres_id)
+
 						var existing_res = _get_cached_subresource(subres_id, pending.scene_path) if subres_id != "" else null
+						if existing_res and target_uid != "" and existing_res.get_scene_unique_id() != "" and existing_res.get_scene_unique_id() != target_uid:
+							existing_res = null
+
 						if existing_res:
-							var updated = _update_existing_subresource(existing_res, pending.value)
-							if updated:
-								if node.get(pending.prop_name) != existing_res:
-									node.set(pending.prop_name, existing_res)
+							if node.get(pending.prop_name) == existing_res:
+								_update_existing_subresource(existing_res, pending.value)
 							else:
-								var res = _import_sub_resource(pending.value)
-								if res:
-									if subres_id != "":
-										_register_subresource(res, subres_id, pending.scene_path)
-									node.set(pending.prop_name, res)
+								node.set(pending.prop_name, existing_res)
 						else:
 							var res = _import_sub_resource(pending.value)
 							if res:
@@ -1481,18 +1482,19 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 
 				if is_ready:
 					var subres_id = value.get("sub_resource_id", "")
+					var target_uid = value.get("scene_unique_id", "")
+					if target_uid == "":
+						target_uid = _clean_unique_id(subres_id)
+
 					var existing_res = _get_cached_subresource(subres_id, scene_path) if subres_id != "" else null
+					if existing_res and target_uid != "" and existing_res.get_scene_unique_id() != "" and existing_res.get_scene_unique_id() != target_uid:
+						existing_res = null
+
 					if existing_res:
-						var updated = _update_existing_subresource(existing_res, value)
-						if updated:
-							if node.get(prop_name) != existing_res:
-								node.set(prop_name, existing_res)
+						if node.get(prop_name) == existing_res:
+							_update_existing_subresource(existing_res, value)
 						else:
-							var res = _import_sub_resource(value)
-							if res:
-								if subres_id != "":
-									_register_subresource(res, subres_id, scene_path)
-								node.set(prop_name, res)
+							node.set(prop_name, existing_res)
 					else:
 						var res = _import_sub_resource(value)
 						if res:
@@ -2498,6 +2500,17 @@ func _on_resource_changed(target, prop_name: String, res: Resource):
 	else:
 		return
 
+	# If the node no longer holds this resource (e.g. replaced by a new material or Make Unique),
+	# disconnect the listener and do not mark properties dirty.
+	var current_scene = _get_target_scene("")
+	if current_scene:
+		var node = network.get_node_by_unique_id(current_scene, id)
+		if is_instance_valid(node) and node.get(prop_name) != res:
+			if is_instance_valid(res) and res is Resource:
+				if res.is_connected("changed", _on_resource_changed.bind(target, prop_name, res)):
+					res.disconnect("changed", _on_resource_changed.bind(target, prop_name, res))
+			return
+
 	# Force re-serialization of this resource next frame
 	if _last_tracked_properties.has(id) and _last_tracked_properties[id].has(prop_name):
 		_last_tracked_properties[id].erase(prop_name)
@@ -2624,16 +2637,22 @@ func _get_cached_subresource(subres_id: String, scene_path: String = "") -> Reso
 func _update_existing_subresource(existing_res: Resource, value: Dictionary) -> bool:
 	if not existing_res:
 		return false
+	var sub_id = value.get("sub_resource_id", "")
+	var u_id = value.get("scene_unique_id", "")
+	if u_id == "":
+		u_id = _clean_unique_id(sub_id)
+
+	# If existing_res already has a scene_unique_id, and the incoming update specifies a different non-empty unique ID,
+	# they are distinct sub-resources! Never overwrite or rename existing_res in-place.
+	if u_id != "" and existing_res.get_scene_unique_id() != "" and existing_res.get_scene_unique_id() != u_id:
+		return false
+
 	var temp_res = _import_sub_resource(value)
 	if not temp_res:
 		return false
 	if temp_res.get_class() != existing_res.get_class():
 		return false
 
-	var sub_id = value.get("sub_resource_id", "")
-	var u_id = value.get("scene_unique_id", "")
-	if u_id == "":
-		u_id = _clean_unique_id(sub_id)
 	if u_id != "":
 		existing_res.set_scene_unique_id(u_id)
 
