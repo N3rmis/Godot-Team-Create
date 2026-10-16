@@ -2191,7 +2191,7 @@ func on_local_scene_saved(filepath: String):
 
 @rpc("any_peer", "reliable")
 func receive_manual_save(filepath: String, bytes: PackedByteArray):
-	var sender_id = multiplayer.get_remote_sender_id()
+	var sender_id = multiplayer.get_remote_sender_id() if (multiplayer and is_inside_tree()) else 0
 	if is_server and sender_id != 0:
 		for pid in multiplayer.get_peers() if multiplayer else []:
 			if pid != sender_id:
@@ -2236,11 +2236,19 @@ func receive_manual_save(filepath: String, bytes: PackedByteArray):
 			if iface:
 				if iface.get_resource_filesystem():
 					iface.get_resource_filesystem().update_file(filepath)
-				if iface.has_method("reload_scene_from_path"):
+				var open_scenes = iface.get_open_scenes() if iface.has_method("get_open_scenes") else PackedStringArray()
+				if filepath in open_scenes and iface.has_method("reload_scene_from_path"):
+					var current_scene = iface.get_edited_scene_root() if iface.has_method("get_edited_scene_root") else null
+					var is_active = (current_scene and current_scene.scene_file_path == filepath)
+					var prev_path = current_scene.scene_file_path if current_scene else ""
 					if scene_sync:
+						if scene_sync.has_method("clear_all_peer_indicators"):
+							scene_sync.clear_all_peer_indicators()
 						scene_sync._is_reloading_scene = true
 						scene_sync._last_scene_path = filepath
 					iface.reload_scene_from_path(filepath)
+					if not is_active and prev_path != "" and iface.has_method("open_scene_from_path"):
+						iface.open_scene_from_path(prev_path)
 					if scene_sync:
 						get_tree().create_timer(0.5).timeout.connect(func():
 							if is_instance_valid(scene_sync):

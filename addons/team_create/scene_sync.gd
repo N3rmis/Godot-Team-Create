@@ -756,6 +756,8 @@ func _track_active_scene():
 				)
 
 func _track_changes_throttled():
+	if _is_reloading_scene:
+		return
 	var current_scene = _get_edited_scene_root()
 	if not current_scene:
 		return
@@ -896,6 +898,8 @@ func _check_single_node_changes(node: Node):
 				last_props[prop_name] = current_props[prop_name]
 
 func _track_selection():
+	if _is_reloading_scene:
+		return
 	var editor = _get_editor_interface()
 	if not editor:
 		return
