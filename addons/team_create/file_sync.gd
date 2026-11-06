@@ -19,6 +19,15 @@ var _http_server: TCPServer
 var _http_clients: Array = []
 var _http_buffers: Dictionary = {}
 var _http_responses: Dictionary = {}
+const HTTP_TOKEN_HEADER = "X-Team-Create-Token"
+const HTTP_MAX_RECORDS_PER_FRAME = 64
+const HTTP_MAX_ACCEPTS_PER_FRAME = 16
+# TLS handshakes are slow, so opening a connection per file at once overflows the server's backlog
+const HTTP_MAX_CONCURRENT_DOWNLOADS = 8
+const HTTP_MAX_DOWNLOAD_RETRIES = 3
+var _http_download_queue: Array = []
+var _http_downloads_active = 0
+var _http_download_retries: Dictionary = {}
 
 func _get_editor_interface():
 	if Engine.is_editor_hint() and Engine.has_singleton("EditorInterface"):
@@ -29,24 +38,39 @@ func _get_editor_interface():
 
 func _process(delta):
 	if _http_server and _http_server.is_listening():
-		if _http_server.is_connection_available():
-			var peer = _http_server.take_connection()
-			_http_clients.append(peer)
-			_http_buffers[peer] = PackedByteArray()
-			_http_responses[peer] = { "data": PackedByteArray(), "sent": 0, "active": false, "timer": 0.0 }
+		for _accept in range(HTTP_MAX_ACCEPTS_PER_FRAME):
+			if not _http_server.is_connection_available():
+				break
+			var tcp = _http_server.take_connection()
+			var peer = StreamPeerTLS.new()
+			if network.server_tls_options and peer.accept_stream(tcp, network.server_tls_options) == OK:
+				_http_clients.append(peer)
+				_http_buffers[peer] = PackedByteArray()
+				_http_responses[peer] = { "data": PackedByteArray(), "sent": 0, "active": false, "timer": 0.0, "tcp": tcp }
+			else:
+				tcp.disconnect_from_host()
 
 		for i in range(_http_clients.size() - 1, -1, -1):
-			var peer: StreamPeerTCP = _http_clients[i]
+			var peer: StreamPeerTLS = _http_clients[i]
+			_http_responses[peer]["tcp"].poll()
 			peer.poll()
 			var status = peer.get_status()
 
-			if status == StreamPeerTCP.STATUS_CONNECTED:
+			if status == StreamPeerTLS.STATUS_HANDSHAKING:
+				# Drop clients that stall during the handshake
+				_http_responses[peer]["timer"] += delta
+				if _http_responses[peer]["timer"] > file_transfer_timeout:
+					peer.disconnect_from_stream()
+					_http_clients.remove_at(i)
+					_http_buffers.erase(peer)
+					_http_responses.erase(peer)
+			elif status == StreamPeerTLS.STATUS_CONNECTED:
 				var resp = _http_responses[peer]
 				resp["timer"] += delta
 
 				# Timeout idle connections
 				if resp["timer"] > file_transfer_timeout:
-					peer.disconnect_from_host()
+					peer.disconnect_from_stream()
 					_http_clients.remove_at(i)
 					_http_buffers.erase(peer)
 					_http_responses.erase(peer)
@@ -57,6 +81,16 @@ func _process(delta):
 						var bytes = peer.get_data(peer.get_available_bytes())
 						if bytes[0] == OK:
 							_http_buffers[peer].append_array(bytes[1])
+							# Each poll exposes one TLS record (16 KB), so drain what's ready or uploads crawl
+							for _record in range(HTTP_MAX_RECORDS_PER_FRAME):
+								peer.poll()
+								var available = peer.get_available_bytes()
+								if available <= 0:
+									break
+								var more = peer.get_data(available)
+								if more[0] != OK:
+									break
+								_http_buffers[peer].append_array(more[1])
 							var buffer_bytes = _http_buffers[peer]
 							var header_end_idx = -1
 							var header_len = 4
@@ -78,7 +112,29 @@ func _process(delta):
 							if header_end_idx != -1:
 								req_str = buffer_bytes.slice(0, header_end_idx).get_string_from_utf8()
 
-								if req_str.begins_with("GET "):
+								if req_str.begins_with("GET " + network.TLS_CERT_PATH + " "):
+									# Public by design: clients pin this, and the password check covers its hash
+									var pem_bytes = network.get_server_cert_pem().to_utf8_buffer()
+									var response_headers = "HTTP/1.1 200 OK\r\nContent-Length: " + str(pem_bytes.size()) + "\r\nConnection: close\r\n\r\n"
+									resp["data"].append_array(response_headers.to_utf8_buffer())
+									resp["data"].append_array(pem_bytes)
+									resp["active"] = true
+								elif req_str.begins_with("GET " + network.PLUGIN_UPDATE_PATH + " "):
+									# Has its own token, because whoever asks for this was refused entry to the session
+									if network.is_valid_update_token(_http_request_token(req_str)):
+										var bundle = network.get_plugin_update_bundle()
+										var response_headers = "HTTP/1.1 200 OK\r\nContent-Length: " + str(bundle.size()) + "\r\nConnection: close\r\n\r\n"
+										resp["data"].append_array(response_headers.to_utf8_buffer())
+										resp["data"].append_array(bundle)
+									else:
+										var response_headers = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+										resp["data"].append_array(response_headers.to_utf8_buffer())
+									resp["active"] = true
+								elif not _is_http_authorized(req_str):
+									var response_headers = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+									resp["data"].append_array(response_headers.to_utf8_buffer())
+									resp["active"] = true
+								elif req_str.begins_with("GET "):
 									var lines_arr = req_str.split("\n")
 									if lines_arr.size() > 0:
 										var parts = lines_arr[0].split(" ")
@@ -130,7 +186,7 @@ func _process(delta):
 								if header_end_idx == -1:
 									# Wait for complete headers up to safety threshold (16KB)
 									if buffer_bytes.size() > 16384:
-										peer.disconnect_from_host()
+										peer.disconnect_from_stream()
 										_http_clients.remove_at(i)
 										_http_buffers.erase(peer)
 										_http_responses.erase(peer)
@@ -139,7 +195,7 @@ func _process(delta):
 								# Check if it's a POST waiting for more body data
 								if req_str.begins_with("POST "):
 									continue
-								peer.disconnect_from_host()
+								peer.disconnect_from_stream()
 								_http_clients.remove_at(i)
 								_http_buffers.erase(peer)
 								_http_responses.erase(peer)
@@ -147,25 +203,34 @@ func _process(delta):
 					# Active response, send in chunks asynchronously
 					var to_send = resp["data"].size() - resp["sent"]
 					if to_send > 0:
-						var chunk = resp["data"].slice(resp["sent"], resp["sent"] + min(to_send, 65536))
-						var sent_arr = peer.put_partial_data(chunk)
-						if sent_arr[0] == OK:
-							resp["sent"] += sent_arr[1]
-							resp["timer"] = 0.0 # Reset timeout on activity
-						elif sent_arr[0] != ERR_BUSY:
-							# Error
-							peer.disconnect_from_host()
-							_http_clients.remove_at(i)
-							_http_buffers.erase(peer)
-							_http_responses.erase(peer)
+						# TLS accepts one record (16 KB) per call, so send several each frame
+						for _record in range(HTTP_MAX_RECORDS_PER_FRAME):
+							to_send = resp["data"].size() - resp["sent"]
+							if to_send <= 0:
+								break
+							var chunk = resp["data"].slice(resp["sent"], resp["sent"] + min(to_send, 65536))
+							var sent_arr = peer.put_partial_data(chunk)
+							if sent_arr[0] == OK:
+								if sent_arr[1] <= 0:
+									break
+								resp["sent"] += sent_arr[1]
+								resp["timer"] = 0.0 # Reset timeout on activity
+							else:
+								if sent_arr[0] != ERR_BUSY:
+									# Error
+									peer.disconnect_from_stream()
+									_http_clients.remove_at(i)
+									_http_buffers.erase(peer)
+									_http_responses.erase(peer)
+								break
 					else:
 						# Done
-						peer.disconnect_from_host()
+						peer.disconnect_from_stream()
 						_http_clients.remove_at(i)
 						_http_buffers.erase(peer)
 						_http_responses.erase(peer)
 
-			elif status == StreamPeerTCP.STATUS_ERROR or status == StreamPeerTCP.STATUS_NONE:
+			else:
 				_http_clients.remove_at(i)
 				_http_buffers.erase(peer)
 				_http_responses.erase(peer)
@@ -184,8 +249,8 @@ func stop_http_server() -> void:
 	if _http_server and _http_server.is_listening():
 		_http_server.stop()
 		for peer in _http_clients:
-			if peer and peer.get_status() == StreamPeerTCP.STATUS_CONNECTED:
-				peer.disconnect_from_host()
+			if peer and peer.get_status() == StreamPeerTLS.STATUS_CONNECTED:
+				peer.disconnect_from_stream()
 		_http_clients.clear()
 		_http_buffers.clear()
 		_http_responses.clear()
@@ -193,6 +258,22 @@ func stop_http_server() -> void:
 			network.tc_print("HTTP File Server stopped.")
 
 
+
+func _http_request_token(req_str: String) -> String:
+	for req_line in req_str.split("\n"):
+		if req_line.to_lower().begins_with(HTTP_TOKEN_HEADER.to_lower() + ":"):
+			return req_line.split(":", true, 1)[1].strip_edges()
+	return ""
+
+func _is_http_authorized(req_str: String) -> bool:
+	if not network or network.session_password == "":
+		return true
+	return network.is_valid_http_token(_http_request_token(req_str))
+
+func _http_auth_headers() -> PackedStringArray:
+	if network and network.http_session_token != "":
+		return PackedStringArray([HTTP_TOKEN_HEADER + ": " + network.http_session_token])
+	return PackedStringArray()
 
 func _get_cached_md5(path: String) -> String:
 	var mod_time = FileAccess.get_modified_time(path)
@@ -224,17 +305,31 @@ func _is_safe_path(p: String) -> bool:
 	if not target.begins_with(base_res):
 		return false
 
-	var rel_path = "res://" + target.trim_prefix(base_res)
+	# Compared in lowercase because macOS and Windows filesystems ignore case
+	var rel_path = "res://" + target.trim_prefix(base_res).to_lower()
 
-	var blocked_dirs = ["addons/team_create", ".team_create", ".godot"]
+	# Colons reach NTFS alternate streams, and Windows ignores trailing dots and spaces
+	if ":" in rel_path.trim_prefix("res://"):
+		return false
+
+	# Hidden paths like .git and .env are never synced, and .git/hooks can run code
+	for part in rel_path.trim_prefix("res://").split("/"):
+		if part.begins_with(".") or part.ends_with(".") or part.ends_with(" "):
+			return false
+
+	var blocked_dirs = ["addons/team_create"]
 	for d in blocked_dirs:
 		if rel_path == "res://" + d or rel_path.begins_with("res://" + d + "/"):
 			return false
 
-	if rel_path == "res://project.godot":
+	# override.cfg replaces project settings at launch, which would bypass settings_sync.gd's rules
+	if rel_path == "res://project.godot" or rel_path == "res://override.cfg":
 		return false
 
 	return true
+
+func is_safe_scene_path(p: String) -> bool:
+	return _is_safe_path(p) and p.get_extension().to_lower() in ["tscn", "scn"]
 
 var _pending_files_to_receive = 0
 var downloading_files: Array = []
@@ -499,7 +594,7 @@ func _on_filesystem_changed():
 					var size = f.get_length()
 					f.close()
 					if size > network.max_file_size:
-						DirAccess.remove_absolute(path)
+						_move_to_trash(path)
 						network.tc_print_rich("[color=red]Warning: File " + path + " is too large (max " + str(network.max_file_size / (1024 * 1024.0)) + " MB). It was deleted and not synced.[/color]")
 						if _file_hash_cache.has(path):
 							_file_hash_cache.erase(path)
@@ -529,17 +624,6 @@ func _on_filesystem_changed():
 					rpc("remote_delete_file", known_path)
 
 	_known_files = current_files.duplicate()
-
-func sync_project_settings():
-	if network and network.is_server:
-		var bytes = FileAccess.get_file_as_bytes("res://project.godot")
-		if network and network.get("is_standalone_server"):
-			var text = bytes.get_string_from_utf8()
-			text = text.replace("run/main_scene=\"res://addons/team_create/server.tscn\"", "")
-			text = text.replace("run/main_scene.teamcreateserver=\"res://addons/team_create/server.tscn\"", "")
-			bytes = text.to_utf8_buffer()
-		if bytes:
-			rpc("receive_project_settings", bytes)
 
 func sync_all_files(all_files: Array = []):
 	_is_syncing_files = true
@@ -606,28 +690,22 @@ func get_all_files(dir_path: String, exclude_dirs: Array = []) -> Array:
 					if ei and ei.get_resource_filesystem():
 						ei.get_resource_filesystem().scan()
 				else:
-					if full_path != "res://project.godot":
+					if full_path != "res://project.godot" and full_path != "res://override.cfg":
 						files.append(full_path)
 			file_name = dir.get_next()
 	return files
 
-@rpc("any_peer", "reliable")
-func receive_project_settings(bytes: PackedByteArray):
-	if multiplayer.get_remote_sender_id() != 1:
-		printerr("Unauthorized settings sync attempt")
-		return
-
-	# Only overwrite if contents actually changed to prevent editor reload loops
-	if FileAccess.file_exists("res://project.godot"):
-		var existing_bytes = FileAccess.get_file_as_bytes("res://project.godot")
-		if existing_bytes == bytes:
-			return
-
-	var file = FileAccess.open("res://project.godot", FileAccess.WRITE)
-	if file:
-		file.store_buffer(bytes)
-		file.close()
-		network.tc_print("Project settings updated.")
+# Nothing the plugin removes is destroyed: it goes to the trash folder under its project path,
+# and an older copy already there is kept too (name.gd, name.gd.1, ...).
+func _move_to_trash(path: String) -> Error:
+	var base = "res://.team_create/trash/" + path.trim_prefix("res://")
+	DirAccess.make_dir_recursive_absolute(base.get_base_dir())
+	var dest = base
+	var copy = 1
+	while FileAccess.file_exists(dest):
+		dest = base + "." + str(copy)
+		copy += 1
+	return DirAccess.rename_absolute(path, dest)
 
 @rpc("any_peer", "reliable")
 func compare_and_sync_files(peer_hashes: Dictionary):
@@ -658,25 +736,16 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 				if path in open_scenes:
 					network.tc_print("Skipping deletion of open scene: ", path)
 					continue
-				if path.ends_with(".tscn") or path.ends_with(".scn") or path.ends_with(".gd"):
-					var trash_dir = "res://.team_create/trash"
-					if not DirAccess.dir_exists_absolute(trash_dir):
-						DirAccess.make_dir_recursive_absolute(trash_dir)
-					var trash_dest = trash_dir + "/" + path.get_file()
-					DirAccess.rename_absolute(path, trash_dest)
-					network.tc_print("Team Create: Moved unreferenced file to trash backup: ", path, " -> ", trash_dest)
-				else:
-					var err = DirAccess.remove_absolute(path)
-					if err != OK:
-						continue
-					network.tc_print("Deleted unused file: ", path)
+				if _move_to_trash(path) != OK:
+					continue
+				network.tc_print("Moved file the server doesn't have to trash: ", path)
 				if _file_hash_cache.has(path):
 					_file_hash_cache.erase(path)
 
 	# Request differing files
 	var files_to_request = []
 	for path in peer_hashes:
-		if path == "res://project.godot" or path.begins_with("res://.godot/"):
+		if path == "res://project.godot" or path == "res://override.cfg" or path.begins_with("res://.godot/"):
 			continue
 
 		# Server is authoritative for scenes: The server never downloads existing scenes over its own copy
@@ -711,6 +780,8 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 	_pending_files_to_receive = files_to_request.size()
 	downloading_files.clear()
 	downloading_files.append_array(files_to_request)
+	_http_download_queue.clear()
+	_http_download_retries.clear()
 
 	_known_files = local_files.duplicate()
 
@@ -733,8 +804,13 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 
 
 func _download_file_http(path: String):
+	if _http_downloads_active >= HTTP_MAX_CONCURRENT_DOWNLOADS:
+		_http_download_queue.append(path)
+		return
+	_http_downloads_active += 1
 	var http_request = HTTPRequest.new()
 	http_request.timeout = file_transfer_timeout
+	http_request.set_tls_options(network.client_tls_options)
 	add_child(http_request)
 	http_request.request_completed.connect(self._http_download_completed.bind(http_request, path))
 
@@ -748,27 +824,44 @@ func _download_file_http(path: String):
 	for i in range(path_parts.size()):
 		path_parts[i] = path_parts[i].uri_encode()
 	var encoded_path = "/".join(path_parts)
-	var url = "http://" + ip + ":" + str(port) + encoded_path
+	var url = "https://" + ip + ":" + str(port) + encoded_path
 
-	var error = http_request.request(url)
+	var error = http_request.request(url, _http_auth_headers())
 	if error != OK:
 		printerr("HTTP Request failed for ", path)
 		http_request.queue_free()
 		_finish_http_download(path)
+		_start_next_http_download()
 
 func _http_download_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, http_request: HTTPRequest, path: String):
 	if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:
+		_http_download_retries.erase(path)
 		receive_file(path, randi(), body, true)
+	elif response_code == 0 and _http_download_retries.get(path, 0) < HTTP_MAX_DOWNLOAD_RETRIES:
+		# Never reached the server, so it's worth another go
+		_http_download_retries[path] = _http_download_retries.get(path, 0) + 1
+		_http_download_queue.append(path)
 	else:
-		printerr("Failed to download file via HTTP: ", path, " Response: ", response_code)
+		_http_download_retries.erase(path)
+		var message = "Failed to download " + path + ". Reconnect to try again."
+		printerr(message, " Result: ", result, " Response: ", response_code)
+		if network and network.has_method("show_toast"):
+			network.show_toast(message, 2)
 		_finish_http_download(path)
 
 	http_request.queue_free()
+	_start_next_http_download()
+
+func _start_next_http_download() -> void:
+	_http_downloads_active -= 1
+	if not _http_download_queue.is_empty():
+		_download_file_http(_http_download_queue.pop_front())
 
 
 func _upload_file_http(path: String, bytes: PackedByteArray):
 	var http_request = HTTPRequest.new()
 	http_request.timeout = file_transfer_timeout
+	http_request.set_tls_options(network.client_tls_options)
 	add_child(http_request)
 	http_request.request_completed.connect(self._http_upload_completed.bind(http_request, path))
 
@@ -782,9 +875,10 @@ func _upload_file_http(path: String, bytes: PackedByteArray):
 	for i in range(path_parts.size()):
 		path_parts[i] = path_parts[i].uri_encode()
 	var encoded_path = "/".join(path_parts)
-	var url = "http://" + ip + ":" + str(port) + encoded_path
+	var url = "https://" + ip + ":" + str(port) + encoded_path
 
-	var headers = ["Content-Type: application/octet-stream"]
+	var headers = _http_auth_headers()
+	headers.append("Content-Type: application/octet-stream")
 	var error = http_request.request_raw(url, headers, HTTPClient.METHOD_POST, bytes)
 	if error != OK:
 		printerr("HTTP POST Request failed for ", path)
@@ -1045,17 +1139,8 @@ func remote_delete_file(path: String):
 		return
 
 	if FileAccess.file_exists(path):
-		if path.ends_with(".tscn") or path.ends_with(".scn") or path.ends_with(".gd"):
-			var trash_dir = "res://.team_create/trash"
-			if not DirAccess.dir_exists_absolute(trash_dir):
-				DirAccess.make_dir_recursive_absolute(trash_dir)
-			var trash_dest = trash_dir + "/" + path.get_file()
-			DirAccess.rename_absolute(path, trash_dest)
-			network.tc_print("Team Create: Moved deleted file to trash backup: ", path, " -> ", trash_dest)
-		else:
-			var err = DirAccess.remove_absolute(path)
-			if err == OK:
-				network.tc_print("Team Create: Replicated file deletion: ", path)
+		if _move_to_trash(path) == OK:
+			network.tc_print("Team Create: Replicated file deletion, moved to trash: ", path)
 
 		if _file_hash_cache.has(path):
 			_file_hash_cache.erase(path)

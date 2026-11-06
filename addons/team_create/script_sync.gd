@@ -5,7 +5,6 @@ extends Node
 ## Real-time collaborative code editing with 100ms debounced line diffs,
 ## live presence carets, collaborator name badges, and selection highlighting.
 
-const CARET_BROADCAST_INTERVAL: float = 0.033 # ~30 FPS for smooth caret movement
 const DIFF_DEBOUNCE_DELAY: float = 0.100      # 100ms debounced diff sync
 const SCRIPT_AUTO_SAVE_INTERVAL: float = 15.0 # Save dirty server script buffers every 15s
 
@@ -33,8 +32,7 @@ var _server_save_timer: float = 0.0
 var _peer_carets: Dictionary = {}
 var _peer_active_scripts: Dictionary = {} # peer_id -> script_path
 
-# Caret throttle timer
-var _caret_timer: float = 0.0
+var _saved_scripts: Dictionary = {}       # script_path -> whether the tab had no unsaved edits last frame
 var _last_broadcast_caret: Dictionary = {}
 
 func _ready():
@@ -89,11 +87,12 @@ func _process(delta: float):
 				_diff_timers.erase(script_path)
 				_broadcast_script_diff(script_path)
 
-	# 4. Stream local caret position to peers (~30 FPS)
-	_caret_timer += delta
-	if _caret_timer >= CARET_BROADCAST_INTERVAL:
-		_caret_timer = 0.0
-		_broadcast_local_caret()
+	# 4. Send the local caret and selection whenever they change. Checked here rather than on
+	# caret_changed because selecting or deselecting without moving the caret doesn't emit it
+	_broadcast_local_caret()
+
+	# 5. Tell peers when a tab gets back to its saved text
+	_share_saved_states()
 
 # ==============================================================================
 # Editor Discovery & Tracking
@@ -105,7 +104,8 @@ func _scan_open_script_editors():
 		return
 
 	var open_scripts = se.get_open_scripts()
-	var open_editors = se.get_open_script_editors()
+	# Text file tabs are listed here but not in open_scripts, which would pair scripts with the wrong tab
+	var open_editors = se.get_open_script_editors().filter(func(e): return e.get_class() != "TextEditor")
 	var current_script = se.get_current_script()
 
 	if is_instance_valid(current_script) and current_script.resource_path != "":
@@ -122,7 +122,7 @@ func _scan_open_script_editors():
 		var path = scr.resource_path
 		if path == "" or not path.begins_with("res://"):
 			continue
-		if not _tracked_editors.has(path):
+		if not _tracked_editors.has(path) or not is_instance_valid(_tracked_editors[path]):
 			_track_code_editor(path, base_editor)
 
 func _track_code_editor(path: String, base_editor: Control):
@@ -282,6 +282,9 @@ func _broadcast_script_diff(path: String):
 @rpc("any_peer", "reliable")
 func apply_script_patch(path: String, start_line: int, old_count: int, new_lines: PackedStringArray, revision: int, checksum: String = ""):
 	var sender_id = multiplayer.get_remote_sender_id() if multiplayer else 0
+	if not _is_safe_script_path(path):
+		printerr("Team Create: Blocked script patch for invalid path: ", path)
+		return
 
 	# 1. Server relay & buffer update
 	if network and network.is_server:
@@ -376,6 +379,10 @@ func apply_script_patch(path: String, start_line: int, old_count: int, new_lines
 	if _overlays.has(path) and is_instance_valid(_overlays[path]):
 		_overlays[path].queue_redraw()
 
+# Built-in scripts use paths like res://scene.tscn::GDScript_abc, which aren't files on disk
+func _is_safe_script_path(path: String) -> bool:
+	return network and network.file_sync and network.file_sync._is_safe_path(path.replace("::", "_"))
+
 func _apply_patch_to_offline_lines(path: String, start_line: int, old_count: int, new_lines: PackedStringArray, revision: int, checksum: String = ""):
 	var lines = _synced_lines.get(path, PackedStringArray())
 	if lines.is_empty() and FileAccess.file_exists(path):
@@ -414,7 +421,7 @@ func _apply_patch_to_server_buffer(path: String, start_line: int, old_count: int
 
 func _save_dirty_server_scripts():
 	for path in _dirty_scripts.keys():
-		if _server_script_buffers.has(path):
+		if _server_script_buffers.has(path) and not "::" in path:
 			var content = "\n".join(_server_script_buffers[path])
 			var f = FileAccess.open(path, FileAccess.WRITE)
 			if f:
@@ -463,7 +470,49 @@ func _broadcast_local_caret():
 	var my_id = multiplayer.get_unique_id()
 	_send_peer_caret(my_id, _active_script_path, line, col, has_sel, sel_from_line, sel_from_col, sel_to_line, sel_to_col)
 
-@rpc("any_peer", "unreliable")
+# Undoing to the saved text or saving only clears the star in the editor that did it, because
+# in every other editor the same text arrived as new edits.
+func _share_saved_states():
+	if not (network and network.is_connected_to_session()):
+		return
+	for path in _tracked_editors:
+		var code_edit = _tracked_editors[path]
+		if not is_instance_valid(code_edit):
+			continue
+		var saved = code_edit.get_version() == code_edit.get_saved_version()
+		var was_saved = _saved_scripts.get(path, saved)
+		_saved_scripts[path] = saved
+		if saved and not was_saved:
+			# The undo itself may still be waiting to go out
+			_diff_timers.erase(path)
+			_broadcast_script_diff(path)
+			var checksum = code_edit.get_text().md5_text()
+			if network.is_server:
+				for pid in network.peers:
+					if pid != 1:
+						rpc_id(pid, "script_back_to_saved", path, checksum)
+			elif multiplayer.get_unique_id() != 1:
+				rpc_id(1, "script_back_to_saved", path, checksum)
+
+@rpc("any_peer", "reliable")
+func script_back_to_saved(path: String, checksum: String):
+	if not _is_safe_script_path(path):
+		return
+	var sender_id = multiplayer.get_remote_sender_id() if multiplayer else 0
+	if network and network.is_server and sender_id != 0:
+		for pid in network.peers:
+			if pid != sender_id and pid != 1:
+				rpc_id(pid, "script_back_to_saved", path, checksum)
+
+	var code_edit = _tracked_editors.get(path)
+	if not is_instance_valid(code_edit) or code_edit.get_text().md5_text() != checksum:
+		return
+	code_edit.tag_saved_version()
+	_saved_scripts[path] = true
+	# The script editor only redraws its star when the text changes
+	code_edit.text_changed.emit()
+
+@rpc("any_peer", "reliable")
 func update_peer_script_caret(peer_id: int, path: String, line: int, col: int, has_sel: bool, sel_from_line: int, sel_from_col: int, sel_to_line: int, sel_to_col: int):
 	if peer_id == 0:
 		return
@@ -515,6 +564,8 @@ func update_peer_script_caret(peer_id: int, path: String, line: int, col: int, h
 		"time": Time.get_ticks_msec()
 	}
 	_peer_active_scripts[peer_id] = path
+	if network and network.scene_sync:
+		network.scene_sync.hold_frame_rate()
 
 	# Trigger redraw if we are viewing this script
 	if _overlays.has(path) and is_instance_valid(_overlays[path]):
@@ -541,6 +592,9 @@ func _request_script_if_needed(path: String):
 @rpc("any_peer", "reliable")
 func request_script_state(path: String):
 	var sender_id = multiplayer.get_remote_sender_id() if multiplayer else 0
+	if not _is_safe_script_path(path):
+		printerr("Team Create: Blocked script request for invalid path: ", path)
+		return
 	var text = ""
 
 	if network and network.is_server:
@@ -559,13 +613,17 @@ func request_script_state(path: String):
 
 @rpc("any_peer", "reliable")
 func receive_script_state(path: String, full_text: String, revision: int):
+	var sender_id = multiplayer.get_remote_sender_id() if multiplayer else 0
+	if (sender_id != 1 and sender_id != 0) or not _is_safe_script_path(path):
+		return
 	full_text = full_text.replace("\r\n", "\n")
 	_script_revisions[path] = revision
 	_synced_lines[path] = full_text.split("\n")
 
 	if _tracked_editors.has(path):
 		var code_edit = _tracked_editors[path]
-		if is_instance_valid(code_edit):
+		# Setting the text counts as an edit in Godot, even when it's identical
+		if is_instance_valid(code_edit) and code_edit.get_text().replace("\r\n", "\n") != full_text:
 			_applying_remote_depth += 1
 			var local_line = code_edit.get_caret_line()
 			var local_col = code_edit.get_caret_column()
