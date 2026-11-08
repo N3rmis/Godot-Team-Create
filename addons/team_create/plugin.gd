@@ -15,14 +15,14 @@ func _enter_tree() -> void:
 
 	# Load UI script and instantiate it.
 	# We're building the UI dynamically to ensure stability and match the screenshot.
-	var ui_script = load("res://addons/team_create/ui.gd")
-	var network_script = load("res://addons/team_create/network.gd")
+	var ui_script = load("res://addons/team_create/ui/ui.gd")
+	var network_script = load("res://addons/team_create/core/network.gd")
 
 	if ui_script == null or network_script == null:
 		printerr("Team Create failed to load core scripts! Reinstall the plugin.")
 		return
 
-	var chat_script = load("res://addons/team_create/chat_window.gd")
+	var chat_script = load("res://addons/team_create/ui/chat_window.gd")
 	dock = ui_script.new()
 	chat_dock = chat_script.new()
 

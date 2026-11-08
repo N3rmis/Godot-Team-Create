@@ -82,7 +82,7 @@ class DummyEditorPlugin extends Node:
 
 func _ready():
 	print("Starting Godot Team Create Headless Server...")
-	var network_script = load("res://addons/team_create/network.gd")
+	var network_script = load("res://addons/team_create/core/network.gd")
 	if not network_script:
 		print("Failed to load network.gd")
 		get_tree().quit(1)

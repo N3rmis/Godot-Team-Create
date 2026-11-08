@@ -641,7 +641,7 @@ func _on_export_pressed() -> void:
 
 func _on_export_dir_selected(dir: String) -> void:
 	if network and network.plugin:
-		var exporter_script = load("res://addons/team_create/server_exporter.gd")
+		var exporter_script = load("res://addons/team_create/core/server_exporter.gd")
 		if exporter_script:
 			# TODO: Add AcceptDialog popup on failure instead of just printing to console
 			exporter_script.export_server(dir, self)

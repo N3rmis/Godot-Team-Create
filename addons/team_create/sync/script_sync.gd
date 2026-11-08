@@ -6,7 +6,7 @@ extends Node
 ## to allow for whatever the sender hadn't seen yet (see text_ot.gd), so people can type at the same time.
 ## Also live presence carets, collaborator name badges, and selection highlighting.
 
-const TextOT = preload("text_ot.gd")
+const TextOT = preload("res://addons/team_create/sync/text_ot.gd")
 
 const DIFF_DEBOUNCE_DELAY: float = 0.100      # How often typing goes out
 const MAX_SCRIPT_HISTORY: int = 1000          # Edits the server keeps for rewriting ones that were sent late
