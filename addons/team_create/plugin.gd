@@ -96,11 +96,6 @@ func _open_and_prioritize_dock() -> void:
 		elif dock_tab_node.has_method("open"):
 			dock_tab_node.open()
 
-# The editor is about to save, so nodes still gliding need their exact values
-func _apply_changes() -> void:
-	if network and network.scene_sync:
-		network.scene_sync.finish_remote_moves()
-
 func _exit_tree() -> void:
 	_cleanup_disk_changed_interceptor()
 

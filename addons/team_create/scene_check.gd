@@ -64,7 +64,7 @@ func _process(delta):
 	if _waiting and now - _sent_at < REPLY_TIMEOUT:
 		return
 	_waiting = false
-	if scene_sync._is_reloading_scene or not scene_sync._remote_moves.is_empty():
+	if scene_sync._is_reloading_scene:
 		_changed_at = now
 		return
 	if now - _changed_at < QUIET_TIME:

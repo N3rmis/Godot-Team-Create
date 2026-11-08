@@ -317,7 +317,6 @@ func _save_server_tracked_scenes():
 
 			# Server bookkeeping, not part of the scene
 			scene_node.remove_meta("scene_file_path")
-			finish_remote_moves()
 			var packed = PackedScene.new()
 			var pack_err = packed.pack(scene_node)
 			scene_node.set_meta("scene_file_path", path)
@@ -914,8 +913,7 @@ func _process(delta):
 	_track_active_scene()
 	_sync_cursor_throttled(delta)
 	_keep_cursors_screen_size()
-	_smooth_remote_moves(delta)
-	_update_glide_frame_rate(not _remote_moves.is_empty() or Time.get_ticks_msec() < _frame_rate_hold_until)
+	_update_glide_frame_rate(Time.get_ticks_msec() < _frame_rate_hold_until)
 
 	if not network or not network.plugin or not network.is_connected_to_session():
 		if not _pending_selection_nodes.is_empty():
@@ -1174,7 +1172,6 @@ func _track_active_scene():
 		_last_scene_path = cur_path
 		# Node IDs are paths, and the root is "." in every scene, so remembered values can't carry over.
 		# Remember this scene's values straight away so later changes to unselected nodes are still seen.
-		finish_remote_moves()
 		_last_tracked_properties.clear()
 		_force_full_sync_next_frame = true
 		_dirty_subresources.clear()
@@ -1265,7 +1262,7 @@ func _is_synced_node_property(node: Node, property: Dictionary) -> bool:
 	return property.usage & PROPERTY_USAGE_EDITOR or property.name == "transform" or property.name == "name" or property.name == "unique_name_in_owner"
 
 func _check_single_node_changes(node: Node):
-	if _is_applying_remote_update or _remote_moves.has(node):
+	if _is_applying_remote_update:
 		return
 	var id = network.assign_unique_id(node)
 	var my_id = multiplayer.get_unique_id() if (network and network.is_connected_to_session()) else 1
@@ -1785,7 +1782,6 @@ func send_resource_again(node: Node, id: String, prop_name: String, scene_path: 
 func _sync_all_node_properties(node: Node, id: String, scene_path: String = ""):
 	if scene_path == "":
 		scene_path = _last_scene_path
-	_finish_remote_move(node)
 	# Create a temporary default instance to compare against
 	var type = node.get_class()
 	if not ClassDB.can_instantiate(type):
@@ -2350,7 +2346,7 @@ func update_node_property(id: String, prop_name: String, value: Variant, scene_p
 				_apply_connections(node, value, current_scene)
 			elif prop_name == GROUPS_KEY:
 				_apply_groups(node, value)
-			elif not _start_remote_move(node, prop_name, value):
+			else:
 				node.set(prop_name, value)
 
 			_is_applying_remote_update = false
@@ -2936,9 +2932,6 @@ const CURSOR_SYNC_INTERVAL = 0.05
 const CURSOR_2D_SIZE = 1.0
 const CURSOR_GLIDE_MS = 500
 const GLIDE_FRAME_SLEEP_USEC = 16000
-const REMOTE_MOVE_PROPS = ["position", "rotation", "scale", "transform", "quaternion", "basis"]
-const REMOTE_MOVE_SPEED = 12.0
-const REMOTE_MOVE_HOLD_MS = 300
 var _local_3d_cursor_pos: Transform3D = Transform3D()
 var _local_2d_cursor_pos: Vector2 = Vector2.ZERO
 var _has_3d_cursor = false
@@ -2947,7 +2940,6 @@ var _has_2d_cursor = false
 var _peer_cursors_3d = {}
 var _glide_frame_rate_raised = false
 var _frame_rate_hold_until = 0
-var _remote_moves = {} # node -> {"target": pose, "exact": {property: value}, "ends": msec}
 var _peer_cursors_2d = {}
 
 
@@ -3229,8 +3221,8 @@ func _keep_cursor_screen_size(cursor: Node2D):
 func hold_frame_rate():
 	_frame_rate_hold_until = Time.get_ticks_msec() + CURSOR_GLIDE_MS
 
-# An unfocused editor only runs about 10 frames a second, far too few to see anything glide, so it
-# gets a normal frame rate while something is moving. The editor sets its own value whenever focus
+# An unfocused editor only runs about 10 frames a second, far too few to see a caret glide, so it
+# gets a normal frame rate while one is moving. The editor sets its own value whenever focus
 # changes, so this only ever replaces the unfocused value, and only puts back what it replaced.
 func _update_glide_frame_rate(gliding: bool):
 	if not gliding and not _glide_frame_rate_raised:
@@ -3247,67 +3239,6 @@ func _update_glide_frame_rate(gliding: bool):
 		if OS.low_processor_usage_mode_sleep_usec == GLIDE_FRAME_SLEEP_USEC:
 			OS.low_processor_usage_mode_sleep_usec = unfocused_sleep
 		_glide_frame_rate_raised = false
-
-# Moves from other editors arrive in steps, so the node glides between them. The exact values go
-# back on as soon as the moves stop, and before anything reads the node to save or send it.
-func _start_remote_move(node: Node, prop_name: String, value: Variant) -> bool:
-	if not prop_name in REMOTE_MOVE_PROPS or not (node is Node2D or node is Node3D) or not node.is_inside_tree():
-		return false
-	if network and (network.get("is_standalone_server") or DisplayServer.get_name() == "headless"):
-		return false
-
-	var shown = _read_pose(node)
-	if _remote_moves.has(node):
-		_write_pose(node, _remote_moves[node]["target"])
-	else:
-		_remote_moves[node] = {"exact": {}}
-	node.set(prop_name, value)
-
-	var move = _remote_moves[node]
-	move["exact"].erase(prop_name)
-	move["exact"][prop_name] = value
-	move["target"] = _read_pose(node)
-	move["ends"] = Time.get_ticks_msec() + REMOTE_MOVE_HOLD_MS
-	_write_pose(node, shown)
-	return true
-
-func _smooth_remote_moves(delta: float):
-	var weight = 1.0 - exp(-delta * REMOTE_MOVE_SPEED)
-	var now = Time.get_ticks_msec()
-	for node in _remote_moves.keys():
-		if not is_instance_valid(node) or now >= _remote_moves[node]["ends"]:
-			_finish_remote_move(node)
-			continue
-		var target = _remote_moves[node]["target"]
-		node.position = node.position.lerp(target[0], weight)
-		if node is Node2D:
-			node.rotation = lerp_angle(node.rotation, target[1], weight)
-		else:
-			var rot = node.rotation
-			node.rotation = Vector3(lerp_angle(rot.x, target[1].x, weight), lerp_angle(rot.y, target[1].y, weight), lerp_angle(rot.z, target[1].z, weight))
-		node.scale = node.scale.lerp(target[2], weight)
-
-func _finish_remote_move(node: Variant):
-	if not _remote_moves.has(node):
-		return
-	var move = _remote_moves[node]
-	_remote_moves.erase(node)
-	if is_instance_valid(node):
-		_write_pose(node, move["target"])
-		for prop_name in move["exact"]:
-			node.set(prop_name, move["exact"][prop_name])
-
-func finish_remote_moves():
-	for node in _remote_moves.keys():
-		_finish_remote_move(node)
-
-func _read_pose(node: Node) -> Array:
-	return [node.position, node.rotation, node.scale]
-
-func _write_pose(node: Node, pose: Array):
-	node.position = pose[0]
-	node.rotation = pose[1]
-	node.scale = pose[2]
 
 func _clear_peer_cursor(peer_id: int):
 	var current_scene = _get_edited_scene_root()

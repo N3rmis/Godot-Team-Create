@@ -22,7 +22,6 @@ var file_sync
 var scene_sync
 var script_sync
 var settings_sync
-var deploy_sync
 var scene_check
 var test_runner
 var node_locks: Dictionary = {}
@@ -188,12 +187,6 @@ func _ready():
 		settings_sync.name = "TeamCreateSettingsSync"
 		settings_sync.network = self
 		add_child(settings_sync)
-	var deploy_sync_script = load("res://addons/team_create/deploy_sync.gd")
-	if deploy_sync_script:
-		deploy_sync = deploy_sync_script.new()
-		deploy_sync.name = "TeamCreateDeploySync"
-		deploy_sync.network = self
-		add_child(deploy_sync)
 	var scene_check_script = load("res://addons/team_create/scene_check.gd")
 	if scene_check_script:
 		scene_check = scene_check_script.new()
@@ -1617,8 +1610,6 @@ func _on_peer_connected(id: int):
 		# Settings go first, so scripts arriving next can already see their autoloads
 		if settings_sync:
 			settings_sync.send_state_to_peer(id)
-		if deploy_sync:
-			deploy_sync.send_state_to_peer(id)
 		# Auto sync all files when a peer joins
 		call_deferred("sync_all_files_to_peer", id)
 		# NOTE: We DO NOT push the scene here anymore! The client will request it when file sync finishes.

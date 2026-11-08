@@ -6,9 +6,6 @@ var network: Node
 # UI Elements
 var status_panel: PanelContainer
 var status_label: Label
-var deploy_btn: Button
-var deploy_status_label: Label
-var deploy_dialog: ConfirmationDialog
 var users_label: RichTextLabel
 var server_msg_label: Label
 var ip_edit: LineEdit
@@ -343,31 +340,6 @@ func _build_ui() -> void:
 	backup_scene_btn.pressed.connect(_on_backup_scene_pressed)
 	sync_vbox.add_child(backup_scene_btn)
 
-	deploy_btn = Button.new()
-	deploy_btn.text = "Deploy to Website"
-	deploy_btn.tooltip_text = "Publish what's saved on the server to the live website, for everyone playing the game."
-	deploy_btn.visible = false
-	deploy_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	deploy_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	deploy_btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	deploy_btn.pressed.connect(_on_deploy_pressed)
-	sync_vbox.add_child(deploy_btn)
-
-	deploy_status_label = Label.new()
-	deploy_status_label.visible = false
-	deploy_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	deploy_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sync_vbox.add_child(deploy_status_label)
-
-	deploy_dialog = ConfirmationDialog.new()
-	deploy_dialog.title = "Deploy to Website"
-	deploy_dialog.dialog_text = "Publish the project to the live website?\n\nThis replaces the game for everyone playing it. Save your scenes first, as tilemap edits only reach the server when saved."
-	deploy_dialog.dialog_autowrap = true
-	deploy_dialog.ok_button_text = "Deploy"
-	deploy_dialog.min_size = Vector2i(420, 0)
-	deploy_dialog.confirmed.connect(_on_deploy_confirmed)
-	add_child(deploy_dialog)
-
 	main_vbox.add_child(HSeparator.new())
 
 	update_btn = Button.new()
@@ -436,24 +408,7 @@ func set_connected(is_host: bool, connected_to_standalone: bool = false) -> void
 			status_label.text = "Status: Connected (Client)\nUser: " + username
 		status_label.add_theme_color_override("font_color", Color.GREEN)
 
-func _on_deploy_pressed() -> void:
-	deploy_dialog.popup_centered()
-
-func _on_deploy_confirmed() -> void:
-	if network and network.deploy_sync:
-		network.deploy_sync.press_deploy()
-
-func update_deploy_state() -> void:
-	var deploy = network.deploy_sync if network else null
-	deploy_btn.visible = deploy != null and deploy.available
-	deploy_btn.disabled = deploy == null or deploy.running
-	deploy_status_label.text = deploy.message if deploy else ""
-	deploy_status_label.visible = deploy_status_label.text != ""
-
 func set_disconnected() -> void:
-	if network and network.deploy_sync:
-		network.deploy_sync.reset()
-	update_deploy_state()
 	host_btn.disabled = false
 	join_btn.disabled = false
 	disconnect_btn.disabled = true
