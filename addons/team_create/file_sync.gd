@@ -119,17 +119,6 @@ func _process(delta):
 									resp["data"].append_array(response_headers.to_utf8_buffer())
 									resp["data"].append_array(pem_bytes)
 									resp["active"] = true
-								elif req_str.begins_with("GET " + network.PLUGIN_UPDATE_PATH + " "):
-									# Has its own token, because whoever asks for this was refused entry to the session
-									if network.is_valid_update_token(_http_request_token(req_str)):
-										var bundle = network.get_plugin_update_bundle()
-										var response_headers = "HTTP/1.1 200 OK\r\nContent-Length: " + str(bundle.size()) + "\r\nConnection: close\r\n\r\n"
-										resp["data"].append_array(response_headers.to_utf8_buffer())
-										resp["data"].append_array(bundle)
-									else:
-										var response_headers = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-										resp["data"].append_array(response_headers.to_utf8_buffer())
-									resp["active"] = true
 								elif not _is_http_authorized(req_str):
 									var response_headers = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
 									resp["data"].append_array(response_headers.to_utf8_buffer())
@@ -614,7 +603,7 @@ func _on_filesystem_changed():
 					var size = f.get_length()
 					f.close()
 					if size > network.max_file_size:
-						_move_to_trash(path)
+						DirAccess.remove_absolute(path)
 						network.tc_print_rich("[color=red]Warning: File " + path + " is too large (max " + str(network.max_file_size / (1024 * 1024.0)) + " MB). It was deleted and not synced.[/color]")
 						if _file_hash_cache.has(path):
 							_file_hash_cache.erase(path)
@@ -740,17 +729,14 @@ func get_all_files(dir_path: String, exclude_dirs: Array = []) -> Array:
 			file_name = dir.get_next()
 	return files
 
-# Nothing the plugin removes is destroyed: it goes to the trash folder under its project path,
-# and an older copy already there is kept too (name.gd, name.gd.1, ...).
-func _move_to_trash(path: String) -> Error:
-	var base = "res://.team_create/trash/" + path.trim_prefix("res://")
-	DirAccess.make_dir_recursive_absolute(base.get_base_dir())
-	var dest = base
-	var copy = 1
-	while FileAccess.file_exists(dest):
-		dest = base + "." + str(copy)
-		copy += 1
-	return DirAccess.rename_absolute(path, dest)
+# Scenes and scripts go to the trash folder, anything else is deleted
+func _delete_file(path: String) -> Error:
+	if path.ends_with(".tscn") or path.ends_with(".scn") or path.ends_with(".gd"):
+		var trash_dir = "res://.team_create/trash"
+		if not DirAccess.dir_exists_absolute(trash_dir):
+			DirAccess.make_dir_recursive_absolute(trash_dir)
+		return DirAccess.rename_absolute(path, trash_dir + "/" + path.get_file())
+	return DirAccess.remove_absolute(path)
 
 @rpc("any_peer", "reliable")
 func compare_and_sync_files(peer_hashes: Dictionary):
@@ -793,9 +779,9 @@ func compare_and_sync_files(peer_hashes: Dictionary):
 				# Made here since the last look, so the server hasn't got it yet rather than having deleted it
 				if is_later_compare and not _synced_hashes.has(path):
 					continue
-				if _move_to_trash(path) != OK:
+				if _delete_file(path) != OK:
 					continue
-				network.tc_print("Moved file the server doesn't have to trash: ", path)
+				network.tc_print("Deleted file the server doesn't have: ", path)
 				_forget_deleted_file(path)
 
 	# Request differing files
@@ -1242,8 +1228,8 @@ func remote_delete_file(path: String):
 	_forget_deleted_file(path)
 
 	if FileAccess.file_exists(path):
-		if _move_to_trash(path) == OK:
-			network.tc_print("Team Create: Replicated file deletion, moved to trash: ", path)
+		if _delete_file(path) == OK:
+			network.tc_print("Team Create: Replicated file deletion: ", path)
 
 		if _known_files.has(path):
 			_known_files.erase(path)

@@ -913,9 +913,9 @@ func _process(delta):
 	# Always track scene tab switches first, then sync local camera
 	_track_active_scene()
 	_sync_cursor_throttled(delta)
-	var cursors_gliding = _smooth_peer_cursors(delta)
+	_keep_cursors_screen_size()
 	_smooth_remote_moves(delta)
-	_update_glide_frame_rate(cursors_gliding or not _remote_moves.is_empty() or Time.get_ticks_msec() < _frame_rate_hold_until)
+	_update_glide_frame_rate(not _remote_moves.is_empty() or Time.get_ticks_msec() < _frame_rate_hold_until)
 
 	if not network or not network.plugin or not network.is_connected_to_session():
 		if not _pending_selection_nodes.is_empty():
@@ -2933,7 +2933,6 @@ func _get_cursor_2d_group_name(peer_id: int) -> StringName:
 # Tracking cursor positions
 var _last_cursor_sync = 0.0
 const CURSOR_SYNC_INTERVAL = 0.05
-const CURSOR_SMOOTH_SPEED = 10.0
 const CURSOR_2D_SIZE = 1.0
 const CURSOR_GLIDE_MS = 500
 const GLIDE_FRAME_SLEEP_USEC = 16000
@@ -2946,7 +2945,6 @@ var _has_3d_cursor = false
 var _has_2d_cursor = false
 
 var _peer_cursors_3d = {}
-var _cursor_targets = {} # cursor node -> {"to": where it's heading, "ends": msec, 0 once it has arrived}
 var _glide_frame_rate_raised = false
 var _frame_rate_hold_until = 0
 var _remote_moves = {} # node -> {"target": pose, "exact": {property: value}, "ends": msec}
@@ -3039,9 +3037,7 @@ func update_peer_cursor_3d(peer_id: int, pos: Transform3D, scene_path: String = 
 
 	var cursor = _get_or_create_peer_cursor_3d(peer_id, current_scene)
 	if cursor:
-		if not _cursor_targets.has(cursor):
-			cursor.global_transform = pos
-		_cursor_targets[cursor] = {"to": pos, "ends": Time.get_ticks_msec() + CURSOR_GLIDE_MS}
+		cursor.global_transform = pos
 
 @rpc("any_peer", "unreliable")
 func update_peer_cursor_2d(peer_id: int, pos: Vector2, scene_path: String = ""):
@@ -3071,11 +3067,9 @@ func update_peer_cursor_2d(peer_id: int, pos: Vector2, scene_path: String = ""):
 
 	var cursor = _get_or_create_peer_cursor_2d(peer_id, current_scene)
 	if cursor:
-		if not _cursor_targets.has(cursor):
-			cursor.global_position = pos
-			_keep_cursor_screen_size(cursor)
-			cursor.global_rotation = 0.0
-		_cursor_targets[cursor] = {"to": pos, "ends": Time.get_ticks_msec() + CURSOR_GLIDE_MS}
+		cursor.global_position = pos
+		cursor.global_rotation = 0.0
+		_keep_cursor_screen_size(cursor)
 
 # TODO: Implement cursor object pooling instead of repeatedly instantiating/freeing cursor meshes
 func _get_or_create_peer_cursor_3d(peer_id: int, current_scene: Node) -> Node3D:
@@ -3213,31 +3207,10 @@ func _get_or_create_peer_cursor_2d(peer_id: int, current_scene: Node) -> Node2D:
 	_peer_cursors_2d[peer_id] = cursor
 	return cursor
 
-func _smooth_peer_cursors(delta: float) -> bool:
-	var weight = 1.0 - exp(-delta * CURSOR_SMOOTH_SPEED)
-	var now = Time.get_ticks_msec()
-	var gliding = false
-	for cursor in _cursor_targets.keys():
-		if not is_instance_valid(cursor) or not cursor.is_inside_tree():
-			_cursor_targets.erase(cursor)
-			continue
-		if cursor is Node2D:
+func _keep_cursors_screen_size():
+	for cursor in _peer_cursors_2d.values():
+		if is_instance_valid(cursor) and cursor.is_inside_tree():
 			_keep_cursor_screen_size(cursor)
-		var move = _cursor_targets[cursor]
-		if move["ends"] == 0:
-			continue
-		var step = weight
-		if now >= move["ends"]:
-			move["ends"] = 0
-			step = 1.0
-		else:
-			gliding = true
-		if cursor is Node3D:
-			cursor.global_transform = cursor.global_transform.interpolate_with(move["to"], step)
-		else:
-			cursor.global_position = cursor.global_position.lerp(move["to"], step)
-			cursor.global_rotation = 0.0
-	return gliding
 
 # Follows the editor's display scale, which is 2 on most high resolution screens
 func _get_cursor_2d_size() -> float:

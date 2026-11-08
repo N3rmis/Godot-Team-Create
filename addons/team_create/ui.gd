@@ -25,7 +25,7 @@ var _saved_login_key = PackedByteArray()
 var _join_address = ""
 var _accepted_key = PackedByteArray()
 var _connect_pressed = false
-var _update_prompt: ConfirmationDialog
+var update_btn: Button
 var host_btn: Button
 var join_btn: Button
 var disconnect_btn: Button
@@ -361,12 +361,23 @@ func _build_ui() -> void:
 
 	deploy_dialog = ConfirmationDialog.new()
 	deploy_dialog.title = "Deploy to Website"
-	deploy_dialog.dialog_text = "Publish the project to the live website?\n\nThis replaces the game for everyone playing it. Save your scenes first, as tilemap and animation edits only reach the server when saved."
+	deploy_dialog.dialog_text = "Publish the project to the live website?\n\nThis replaces the game for everyone playing it. Save your scenes first, as tilemap edits only reach the server when saved."
 	deploy_dialog.dialog_autowrap = true
 	deploy_dialog.ok_button_text = "Deploy"
 	deploy_dialog.min_size = Vector2i(420, 0)
 	deploy_dialog.confirmed.connect(_on_deploy_confirmed)
 	add_child(deploy_dialog)
+
+	main_vbox.add_child(HSeparator.new())
+
+	update_btn = Button.new()
+	update_btn.text = "Check for Updates"
+	update_btn.tooltip_text = "Check GitHub for newer versions of the Godot Team Create plugin."
+	update_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	update_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	update_btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	update_btn.pressed.connect(_on_update_pressed)
+	main_vbox.add_child(update_btn)
 
 	export_dialog = FileDialog.new()
 	export_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
@@ -660,6 +671,15 @@ func _on_backup_scene_pressed() -> void:
 				backup_scene_btn.text = "Create Backup"
 		)
 
+func _on_update_pressed() -> void:
+	if network and network.plugin:
+		if update_btn.text == "Update Available!":
+			network.plugin.download_update()
+		else:
+			update_btn.text = "Checking..."
+			update_btn.disabled = true
+			network.plugin.check_for_updates()
+
 func _on_export_pressed() -> void:
 	if export_dialog:
 		export_dialog.popup_centered_ratio(0.5)
@@ -682,17 +702,3 @@ func show_error(title: String, message: String) -> void:
 	dialog.popup_centered()
 	dialog.confirmed.connect(dialog.queue_free)
 	dialog.canceled.connect(dialog.queue_free)
-
-func show_plugin_update_prompt(codes: String) -> void:
-	if is_instance_valid(_update_prompt):
-		_update_prompt.queue_free()
-	_update_prompt = ConfirmationDialog.new()
-	_update_prompt.title = "Update Team Create?"
-	_update_prompt.dialog_text = "The server is running a different copy of the Team Create plugin, so you can't join with this one. " + codes + "\n\nInstall the server's copy? Your open scenes will be saved and the editor will restart."
-	_update_prompt.dialog_autowrap = true
-	_update_prompt.min_size = Vector2i(480, 0) * (EditorInterface.get_editor_scale() if Engine.is_editor_hint() else 1.0)
-	_update_prompt.ok_button_text = "Update and Restart"
-	_update_prompt.cancel_button_text = "Not Now"
-	_update_prompt.confirmed.connect(network.download_plugin_update)
-	add_child(_update_prompt)
-	_update_prompt.popup_centered()
