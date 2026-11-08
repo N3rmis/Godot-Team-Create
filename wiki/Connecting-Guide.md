@@ -46,4 +46,22 @@ If you want a server running 24/7 without keeping the Godot editor open on your 
 4. In that folder, run:
    - **Windows:** `start_server.bat`
    - **Linux:** `./start_server.sh`
-5. Connect to it by putting the server machine's IP into the dock and clicking **Join**.
+5. Connect to it by putting the server machine's IP or domain into the dock and clicking **Join**.
+
+If the server is on the internet, **set a password**. See [the server guide](../README_SERVER.md#setting-a-password) for how to set one and use a domain.
+
+## Project Settings
+
+Project settings sync automatically while you're connected, so there's no need to share `project.godot`. See [the server guide](../README_SERVER.md#project-settings) for how autoloads behave on a dedicated server.
+
+## Passwords
+
+Type a password into the **Server Password** box before clicking **Host LAN** or **Join**. When hosting, that becomes the session password, and it isn't saved.
+
+To avoid typing it each time you join, tick **Remember Password**. Once the server accepts it, the editor saves a hash of the password on your computer and joins that server by itself whenever you open this project. Joining makes your project folder match the server, so this also happens without a click. Untick the box to forget the password. If the password changes, the saved one is forgotten and you'll be asked to type the new one.
+
+Anyone who copies that saved file can join the server until the password is changed, and could try to guess a short password from it, so use a long random password.
+
+## Encryption
+
+Connections are encrypted automatically, so there's nothing to set up. The password also proves you've reached the real server, so use one whenever you connect over the internet. Everyone needs the exact same copy of the plugin, and the server refuses to let you join if yours is different. If the server has a password, it offers you its copy, and you can update and restart with one click.

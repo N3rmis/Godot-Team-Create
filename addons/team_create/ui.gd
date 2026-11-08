@@ -10,12 +10,23 @@ var users_label: RichTextLabel
 var server_msg_label: Label
 var ip_edit: LineEdit
 var username_edit: LineEdit
+var color_picker: ColorPickerButton
+var _shown_color = Color.WHITE
+var _has_saved_color = false
+var password_edit: LineEdit
+var remember_check: CheckBox
+const SAVED_LOGINS_FILE = "team_create_logins.cfg"
+const AUTO_JOIN_DELAY_SEC = 2.0
+var _saved_login_address = ""
+var _saved_login_key = PackedByteArray()
+var _join_address = ""
+var _accepted_key = PackedByteArray()
+var _connect_pressed = false
+var update_btn: Button
 var host_btn: Button
 var join_btn: Button
 var disconnect_btn: Button
 
-var sync_settings_btn: Button
-var update_btn: Button
 
 var export_btn: Button
 var export_dialog: FileDialog
@@ -162,7 +173,20 @@ func _build_ui() -> void:
 	username_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	username_edit.max_length = 15
 	username_edit.text_changed.connect(_on_username_changed)
-	profile_vbox.add_child(username_edit)
+
+	var profile_hbox = HBoxContainer.new()
+	profile_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	profile_vbox.add_child(profile_hbox)
+	profile_hbox.add_child(username_edit)
+
+	color_picker = ColorPickerButton.new()
+	color_picker.tooltip_text = "Your colour across all projects, shown on your cursor, selections and chat messages."
+	color_picker.custom_minimum_size = Vector2(44, 0) * (EditorInterface.get_editor_scale() if Engine.is_editor_hint() else 1.0)
+	color_picker.edit_alpha = false
+	color_picker.color = _shown_color
+	color_picker.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	color_picker.popup_closed.connect(_on_color_picker_closed)
+	profile_hbox.add_child(color_picker)
 
 	# --- Connectivity Panel ---
 	var conn_panel = PanelContainer.new()
@@ -189,13 +213,29 @@ func _build_ui() -> void:
 
 	ip_edit = LineEdit.new()
 	ip_edit.text = "127.0.0.1"
-	ip_edit.placeholder_text = "Host IP Address (e.g., 127.0.0.1)"
-	ip_edit.tooltip_text = "Enter the IP address of the host you want to join over LAN."
+	ip_edit.placeholder_text = "Host IP or Domain (e.g., play.example.com)"
+	ip_edit.tooltip_text = "Enter the IP address or domain of the host you want to join."
 	ip_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ip_edit.clear_button_enabled = true
 	ip_edit.select_all_on_focus = true
 	ip_edit.text_changed.connect(_on_ip_changed)
 	lan_container.add_child(ip_edit)
+
+	password_edit = LineEdit.new()
+	password_edit.placeholder_text = "Server Password"
+	password_edit.tooltip_text = "Required to join a password-protected server. Host LAN uses it as the session password."
+	password_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	password_edit.secret = true
+	password_edit.clear_button_enabled = true
+	lan_container.add_child(password_edit)
+
+	remember_check = CheckBox.new()
+	remember_check.text = "Remember Password"
+	remember_check.tooltip_text = "Saves a hash of the password on this computer, for this project and server, once it's accepted. The editor then joins by itself when this project opens, which makes the project folder match the server. Untick to forget it."
+	remember_check.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	remember_check.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	remember_check.toggled.connect(_on_remember_toggled)
+	lan_container.add_child(remember_check)
 
 	var lan_btn_hbox = HBoxContainer.new()
 	lan_btn_hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -280,15 +320,6 @@ func _build_ui() -> void:
 	sync_status_btn.disabled = true
 	sync_vbox.add_child(sync_status_btn)
 
-	sync_settings_btn = Button.new()
-	sync_settings_btn.text = "Sync Project Settings"
-	sync_settings_btn.tooltip_text = "(Server only) Force push project.godot to all clients."
-	sync_settings_btn.disabled = true
-	sync_settings_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	sync_settings_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sync_settings_btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	sync_settings_btn.pressed.connect(_on_sync_settings_pressed)
-	sync_vbox.add_child(sync_settings_btn)
 
 	export_btn = Button.new()
 	export_btn.text = "Export Headless Server"
@@ -340,17 +371,27 @@ func _ready() -> void:
 				username_edit.text = saved_name
 				_on_username_changed(saved_name)
 
+		if settings.has_setting("team_create/color"):
+			var saved_color = settings.get_setting("team_create/color")
+			if saved_color is String and Color.html_is_valid(saved_color):
+				_has_saved_color = true
+				_show_color(Color.html(saved_color))
+				if network:
+					network.update_local_color(_shown_color)
+
 		if settings.has_setting("team_create/last_ip"):
 			var saved_ip = settings.get_setting("team_create/last_ip")
 			if saved_ip != "":
 				ip_edit.text = saved_ip
 				_on_ip_changed(saved_ip)
 
+	_load_saved_login()
+	_auto_join_saved_login()
+
 func set_connected(is_host: bool, connected_to_standalone: bool = false) -> void:
 	host_btn.disabled = true
 	join_btn.disabled = true
 	disconnect_btn.disabled = false
-	sync_settings_btn.disabled = false
 	backup_scene_btn.disabled = false
 	sync_status_btn.text = "✓ Up to date!"
 	sync_status_btn.add_theme_color_override("font_color", Color.LIGHT_GREEN)
@@ -371,7 +412,6 @@ func set_disconnected() -> void:
 	host_btn.disabled = false
 	join_btn.disabled = false
 	disconnect_btn.disabled = true
-	sync_settings_btn.disabled = true
 	backup_scene_btn.disabled = true
 	sync_status_btn.text = "Not connected"
 	sync_status_btn.add_theme_color_override("font_color", Color.GRAY)
@@ -381,6 +421,7 @@ func set_disconnected() -> void:
 	status_label.text = "Status: Disconnected"
 	status_label.add_theme_color_override("font_color", Color.GRAY)
 	users_label.text = "Users: 1"
+	username_edit.placeholder_text = "Display Name"
 
 func update_users_count(count: int) -> void:
 	if network:
@@ -406,6 +447,12 @@ func update_users_count(count: int) -> void:
 			else:
 				text += "[color=#" + color + "]" + username + "[/color]\n"
 		users_label.text = text
+		if my_id != 0 and network.peers.has(my_id):
+			# Until a colour has been picked, show the one the server assigned
+			if not _has_saved_color:
+				_show_color(network.get_user_color(my_id))
+			# With no name set, this is what everyone else sees
+			username_edit.placeholder_text = network.get_username(my_id)
 	else:
 		users_label.text = "Users: " + str(count)
 
@@ -426,30 +473,149 @@ func _on_username_changed(new_text: String) -> void:
 	if network:
 		network.update_local_username(new_text)
 
+func _show_color(color: Color) -> void:
+	_shown_color = color
+	color_picker.color = color
+
+func _on_color_picker_closed() -> void:
+	if color_picker.color == _shown_color:
+		return
+	_shown_color = color_picker.color
+	_has_saved_color = true
+	var settings = _get_editor_settings()
+	if settings:
+		settings.set_setting("team_create/color", _shown_color.to_html(false))
+	if network:
+		network.update_local_color(_shown_color)
+
 func _on_ip_changed(new_text: String) -> void:
 	var settings = _get_editor_settings()
 	if settings:
 		settings.set_setting("team_create/last_ip", new_text)
+	_update_password_placeholder()
 
 func _on_host_pressed() -> void:
+	_connect_pressed = true
 	if network:
+		network.scenes_to_reopen = PackedStringArray()
+		_join_address = ""
+		_accepted_key = PackedByteArray()
+		network.saved_auth_key = PackedByteArray()
+		network.session_password = password_edit.text
 		network.host_lan_server(ip_edit.text)
 
 func _on_join_pressed() -> void:
+	_connect_pressed = true
+	if network:
+		network.scenes_to_reopen = PackedStringArray()
+	_join()
+
+func _join() -> void:
 	if network:
 		if network.has_method("stop_local_server"):
 			network.stop_local_server()
+		_join_address = ip_edit.text.strip_edges()
+		_accepted_key = PackedByteArray()
+		network.saved_auth_key = _saved_key_for_address() if password_edit.text == "" else PackedByteArray()
+		network.session_password = password_edit.text
 		network.join_server(ip_edit.text)
+
+func _saved_key_for_address() -> PackedByteArray:
+	if ip_edit.text.strip_edges() == _saved_login_address:
+		return _saved_login_key
+	return PackedByteArray()
+
+func _update_password_placeholder() -> void:
+	password_edit.placeholder_text = "Saved Password" if not _saved_key_for_address().is_empty() else "Server Password"
+
+func _saved_logins_path() -> String:
+	return EditorInterface.get_editor_paths().get_config_dir().path_join(SAVED_LOGINS_FILE)
+
+# Logins are kept per project, because joining makes the project folder match the server.
+# The last address is shared between projects, so it can't be what decides to auto-join.
+# They're also kept outside the project, where they would sync to everyone.
+func _saved_login_section() -> String:
+	return ProjectSettings.globalize_path("res://").sha256_text()
+
+func _load_saved_login() -> void:
+	var config = ConfigFile.new()
+	if config.load(_saved_logins_path()) != OK:
+		return
+	var address = str(config.get_value(_saved_login_section(), "address", ""))
+	var key = str(config.get_value(_saved_login_section(), "key", "")).hex_decode()
+	if address == "" or key.size() != 32:
+		return
+	_saved_login_address = address
+	_saved_login_key = key
+	remember_check.set_pressed_no_signal(true)
+	ip_edit.text = address
+	_on_ip_changed(address)
+
+func _write_saved_logins(config: ConfigFile) -> void:
+	var path = _saved_logins_path()
+	var err = config.save(path)
+	if err != OK:
+		push_warning("Team Create could not update its saved logins: " + error_string(err))
+	elif OS.get_name() != "Windows":
+		FileAccess.set_unix_permissions(path, FileAccess.UNIX_READ_OWNER | FileAccess.UNIX_WRITE_OWNER)
+
+func _save_login(address: String, key: PackedByteArray) -> void:
+	if address == "" or (address == _saved_login_address and key == _saved_login_key):
+		return
+	var config = ConfigFile.new()
+	config.load(_saved_logins_path())
+	config.set_value(_saved_login_section(), "address", address)
+	config.set_value(_saved_login_section(), "key", key.hex_encode())
+	_write_saved_logins(config)
+	_saved_login_address = address
+	_saved_login_key = key
+	_update_password_placeholder()
+
+func forget_saved_login() -> void:
+	_saved_login_address = ""
+	_saved_login_key = PackedByteArray()
+	_update_password_placeholder()
+	var config = ConfigFile.new()
+	if config.load(_saved_logins_path()) == OK and config.has_section(_saved_login_section()):
+		config.erase_section(_saved_login_section())
+		_write_saved_logins(config)
+
+func on_password_accepted(key: PackedByteArray) -> void:
+	_accepted_key = key
+	if remember_check.button_pressed:
+		_save_login(_join_address, key)
+
+func _on_remember_toggled(remember: bool) -> void:
+	if not remember:
+		forget_saved_login()
+	elif not _accepted_key.is_empty() and network and network.is_connected_to_session():
+		_save_login(_join_address, _accepted_key)
+
+func _auto_join_saved_login() -> void:
+	if _saved_login_key.is_empty() or DisplayServer.get_name() == "headless":
+		return
+	# Joining reloads files, so let the editor finish restoring the project first
+	await get_tree().create_timer(AUTO_JOIN_DELAY_SEC).timeout
+	var filesystem = EditorInterface.get_resource_filesystem()
+	while filesystem.is_scanning():
+		await get_tree().create_timer(0.5).timeout
+	if not _connect_pressed and not _saved_key_for_address().is_empty():
+		network.scenes_to_reopen = _open_scenes_current_last()
+		_join()
+
+func _open_scenes_current_last() -> PackedStringArray:
+	var scenes = EditorInterface.get_open_scenes()
+	var current = EditorInterface.get_edited_scene_root()
+	if current and current.scene_file_path in scenes:
+		scenes.remove_at(scenes.find(current.scene_file_path))
+		scenes.append(current.scene_file_path)
+	return scenes
 
 func _on_disconnect_pressed() -> void:
 	if network:
 		network.disconnect_peer(true)
 		if network.has_method("stop_local_server"):
 			network.stop_local_server()
-
-func _on_sync_settings_pressed() -> void:
-	if network:
-		network.sync_project_settings()
 
 func _on_backup_scene_pressed() -> void:
 	if network:
@@ -468,7 +634,6 @@ func _on_update_pressed() -> void:
 			update_btn.text = "Checking..."
 			update_btn.disabled = true
 			network.plugin.check_for_updates()
-
 
 func _on_export_pressed() -> void:
 	if export_dialog:

@@ -2,11 +2,14 @@
 extends Node
 
 ## Team Create - Collaborative Script Synchronization & Presence
-## Real-time collaborative code editing with 100ms debounced line diffs,
-## live presence carets, collaborator name badges, and selection highlighting.
+## Real-time collaborative code editing. Edits go through the server, which puts them in order and rewrites each
+## to allow for whatever the sender hadn't seen yet (see text_ot.gd), so people can type at the same time.
+## Also live presence carets, collaborator name badges, and selection highlighting.
 
-const CARET_BROADCAST_INTERVAL: float = 0.033 # ~30 FPS for smooth caret movement
-const DIFF_DEBOUNCE_DELAY: float = 0.100      # 100ms debounced diff sync
+const TextOT = preload("text_ot.gd")
+
+const DIFF_DEBOUNCE_DELAY: float = 0.100      # How often typing goes out
+const MAX_SCRIPT_HISTORY: int = 1000          # Edits the server keeps for rewriting ones that were sent late
 const SCRIPT_AUTO_SAVE_INTERVAL: float = 15.0 # Save dirty server script buffers every 15s
 
 var network: Node
@@ -16,16 +19,22 @@ var _tracked_editors: Dictionary = {}    # script_path -> CodeEdit
 var _active_script_path: String = ""      # Currently focused script in editor
 var _overlays: Dictionary = {}           # script_path -> ScriptPresenceOverlay
 
-# Text synchronization state
-var _synced_lines: Dictionary = {}       # script_path -> PackedStringArray
-var _script_revisions: Dictionary = {}   # script_path -> int
+# Text synchronization state (Client)
+# script_path -> {text, rev, outstanding, buffer, ready, closing, reloaded}. text is what the editor had when last checked,
+# rev is the last server edit included in it, outstanding is the edit the server hasn't confirmed yet, and buffer
+# is everything typed since. Only one edit is on its way at a time.
+var _docs: Dictionary = {}
 var _diff_timers: Dictionary = {}        # script_path -> float
 var _dirty_scripts: Dictionary = {}       # script_path -> bool
-var _applying_remote_depth: int = 0       # Suppress local diffs during remote updates
+var _local_delivery: bool = false         # A host's editor is getting a message from its own server
+var _pending_saved: Dictionary = {}       # script_path -> checksum of text someone saved, that hasn't arrived yet
+var _last_saved_by_peer: Dictionary = {}  # script_path -> checksum of the text someone most recently saved
+var _saved_versions: Dictionary = {}      # script_path -> the tab's saved version number last time it was checked
+var _saved_checksums: Dictionary = {}     # script_path -> checksum of what this editor last saved
 
-# Server text buffers (Headless / Host persistence)
-var _server_script_buffers: Dictionary = {} # script_path -> PackedStringArray
-var _server_script_revisions: Dictionary = {} # script_path -> int
+# Server text (Headless / Host)
+# script_path -> {text, rev, history, subscribers}. Only for scripts someone has open.
+var _server_docs: Dictionary = {}
 var _server_save_timer: float = 0.0
 
 # Presence state
@@ -33,8 +42,7 @@ var _server_save_timer: float = 0.0
 var _peer_carets: Dictionary = {}
 var _peer_active_scripts: Dictionary = {} # peer_id -> script_path
 
-# Caret throttle timer
-var _caret_timer: float = 0.0
+var _saved_scripts: Dictionary = {}       # script_path -> whether the tab had no unsaved edits last frame
 var _last_broadcast_caret: Dictionary = {}
 
 func _ready():
@@ -80,20 +88,21 @@ func _process(delta: float):
 	# 2. Client active script scan & editor tracking
 	_scan_open_script_editors()
 
-	# 3. Process 100ms debounced diff timers
+	# 3. Send what's been typed
 	var active_keys = _diff_timers.keys()
 	for script_path in active_keys:
 		if _diff_timers.has(script_path):
 			_diff_timers[script_path] -= delta
 			if _diff_timers[script_path] <= 0.0:
 				_diff_timers.erase(script_path)
-				_broadcast_script_diff(script_path)
+				_flush_local_edits(script_path)
 
-	# 4. Stream local caret position to peers (~30 FPS)
-	_caret_timer += delta
-	if _caret_timer >= CARET_BROADCAST_INTERVAL:
-		_caret_timer = 0.0
-		_broadcast_local_caret()
+	# 4. Send the local caret and selection whenever they change. Checked here rather than on
+	# caret_changed because selecting or deselecting without moving the caret doesn't emit it
+	_broadcast_local_caret()
+
+	# 5. Tell peers when a tab gets back to its saved text
+	_share_saved_states()
 
 # ==============================================================================
 # Editor Discovery & Tracking
@@ -105,13 +114,12 @@ func _scan_open_script_editors():
 		return
 
 	var open_scripts = se.get_open_scripts()
-	var open_editors = se.get_open_script_editors()
+	# Text file tabs are listed here but not in open_scripts, which would pair scripts with the wrong tab
+	var open_editors = se.get_open_script_editors().filter(func(e): return e.get_class() != "TextEditor")
 	var current_script = se.get_current_script()
 
 	if is_instance_valid(current_script) and current_script.resource_path != "":
-		if _active_script_path != current_script.resource_path:
-			_active_script_path = current_script.resource_path
-			_request_script_if_needed(_active_script_path)
+		_active_script_path = current_script.resource_path
 
 	var count = min(open_scripts.size(), open_editors.size())
 	for i in range(count):
@@ -122,7 +130,7 @@ func _scan_open_script_editors():
 		var path = scr.resource_path
 		if path == "" or not path.begins_with("res://"):
 			continue
-		if not _tracked_editors.has(path):
+		if not _tracked_editors.has(path) or not is_instance_valid(_tracked_editors[path]):
 			_track_code_editor(path, base_editor)
 
 func _track_code_editor(path: String, base_editor: Control):
@@ -134,16 +142,19 @@ func _track_code_editor(path: String, base_editor: Control):
 
 	_tracked_editors[path] = code_edit
 
-	# Initialize synced text state if not already set
-	if not _synced_lines.has(path):
-		var text = code_edit.get_text() if code_edit.has_method("get_text") else ""
-		_synced_lines[path] = text.split("\n")
-		_script_revisions[path] = 0
+	# Whatever a new tab has counts for nothing until the server says what the text is
+	_docs[path] = {"text": "", "rev": 0, "outstanding": null, "buffer": null, "ready": false, "closing": false, "reloaded": false}
+	_request_script_state(path)
 
 	# Connect text changes
 	var changed_callable = Callable(self, "_on_code_edit_text_changed").bind(path)
 	if code_edit.has_signal("text_changed") and not code_edit.text_changed.is_connected(changed_callable):
 		code_edit.text_changed.connect(changed_callable)
+
+	# Godot reloads a tab from disk when the window gets focus back
+	var set_callable = Callable(self, "_on_code_edit_text_set").bind(path)
+	if code_edit.has_signal("text_set") and not code_edit.text_set.is_connected(set_callable):
+		code_edit.text_set.connect(set_callable)
 
 	# Connect caret changes
 	var caret_callable = Callable(self, "_on_code_edit_caret_changed").bind(path)
@@ -200,14 +211,20 @@ func _on_editor_script_changed(script: Script):
 	var path = script.resource_path
 	if path != "":
 		_active_script_path = path
-		_request_script_if_needed(path)
 
 func _on_script_closed(script: Script):
 	if not is_instance_valid(script):
 		return
 	var path = script.resource_path
+	_flush_local_edits(path)
 	if _tracked_editors.has(path):
 		_tracked_editors.erase(path)
+	if _docs.has(path):
+		# Anything still on its way needs the server's answer before this can be let go
+		if _docs[path].outstanding != null:
+			_docs[path].closing = true
+		else:
+			_close_doc(path)
 	if _overlays.has(path):
 		var ov = _overlays[path]
 		if is_instance_valid(ov):
@@ -220,206 +237,335 @@ func _on_script_closed(script: Script):
 			_send_peer_caret(my_id, "", 0, 0, false, 0, 0, 0, 0)
 
 func _on_code_edit_text_changed(path: String):
-	if _applying_remote_depth > 0:
-		return
-	# Debounce diff calculation by 100ms
-	_diff_timers[path] = DIFF_DEBOUNCE_DELAY
+	# Not restarted by each key, or fast typing wouldn't go out until it paused
+	if not _diff_timers.has(path):
+		_diff_timers[path] = DIFF_DEBOUNCE_DELAY
+
+# The disk can be older than the live text, and sending that out would undo what people typed. A change made
+# outside Godot still gets here, as an upload.
+func _on_code_edit_text_set(path: String):
+	if _docs.has(path):
+		_docs[path].reloaded = true
+		if not _diff_timers.has(path):
+			_diff_timers[path] = 0.0
 
 func _on_code_edit_caret_changed(path: String):
 	if _overlays.has(path) and is_instance_valid(_overlays[path]):
 		_overlays[path].queue_redraw()
 
 # ==============================================================================
-# 100ms Debounced Diff Synchronization
+# Merged Text Editing: Client
 # ==============================================================================
 
-func _broadcast_script_diff(path: String):
-	if not _tracked_editors.has(path):
+func _local_peer_id() -> int:
+	return multiplayer.get_unique_id() if (network and network.is_connected_to_session()) else 0
+
+func _flush_local_edits(path: String):
+	var doc = _docs.get(path)
+	if not doc or not doc.ready or doc.closing:
 		return
-	var code_edit = _tracked_editors[path]
+	var code_edit = _tracked_editors.get(path)
 	if not is_instance_valid(code_edit):
-		_tracked_editors.erase(path)
 		return
-
-	var cur_text = code_edit.get_text() if code_edit.has_method("get_text") else ""
-	var cur_lines = cur_text.split("\n")
-	var old_lines = _synced_lines.get(path, PackedStringArray())
-
-	if cur_lines == old_lines:
+	var text = code_edit.get_text().replace("\r\n", "\n")
+	if doc.reloaded:
+		doc.reloaded = false
+		if text != doc.text:
+			_apply_op_to_editor(code_edit, text, TextOT.diff(text, doc.text))
+			# If the disk just hadn't caught up with a save yet, this tab isn't really unsaved
+			if _last_saved_by_peer.has(path):
+				_pending_saved[path] = _last_saved_by_peer[path]
+				_clear_star_if_saved(path)
 		return
+	if text == doc.text:
+		return
+	var op = TextOT.diff(doc.text, text)
+	doc.text = text
+	if doc.outstanding != null:
+		doc.buffer = TextOT.compose(doc.buffer, op) if doc.buffer != null else op
+	else:
+		doc.outstanding = op
+		_send_outstanding(path)
 
-	# Fast prefix scan: find first line that differs
-	var start_line = 0
-	var min_len = min(old_lines.size(), cur_lines.size())
-	while start_line < min_len and old_lines[start_line] == cur_lines[start_line]:
-		start_line += 1
+func _send_outstanding(path: String):
+	var doc = _docs[path]
+	if network.is_server:
+		_server_submit(path, _local_peer_id(), doc.rev, doc.outstanding)
+	else:
+		rpc_id(1, "submit_script_edit", path, doc.rev, doc.outstanding)
 
-	# Fast suffix scan: find last line that differs from bottom
-	var old_end = old_lines.size() - 1
-	var cur_end = cur_lines.size() - 1
-	while old_end >= start_line and cur_end >= start_line and old_lines[old_end] == cur_lines[cur_end]:
-		old_end -= 1
-		cur_end -= 1
+# Built-in scripts use paths like res://scene.tscn::GDScript_abc, which aren't files on disk
+func _is_safe_script_path(path: String) -> bool:
+	return network and network.file_sync and network.file_sync._is_safe_path(path.replace("::", "_"))
 
-	var old_count = max(0, old_end - start_line + 1)
-	var new_slice: PackedStringArray = cur_lines.slice(start_line, cur_end + 1)
-
-	var next_rev = _script_revisions.get(path, 0) + 1
-	_script_revisions[path] = next_rev
-	_synced_lines[path] = cur_lines
-	var checksum = cur_text.md5_text()
-
-	# Targeted delivery: host sends directly to peers; clients send to server (peer 1) for relay
-	if network and network.is_server:
-		_apply_patch_to_server_buffer(path, start_line, old_count, new_slice)
-		_server_script_revisions[path] = next_rev
-		for pid in network.peers:
-			if pid != 1:
-				rpc_id(pid, "apply_script_patch", path, start_line, old_count, new_slice, next_rev, checksum)
-	elif multiplayer.get_unique_id() != 1:
-		rpc_id(1, "apply_script_patch", path, start_line, old_count, new_slice, next_rev, checksum)
+func _from_server() -> bool:
+	return _local_delivery or multiplayer.get_remote_sender_id() == 1
 
 @rpc("any_peer", "reliable")
-func apply_script_patch(path: String, start_line: int, old_count: int, new_lines: PackedStringArray, revision: int, checksum: String = ""):
-	var sender_id = multiplayer.get_remote_sender_id() if multiplayer else 0
-
-	# 1. Server relay & buffer update
-	if network and network.is_server:
-		_apply_patch_to_server_buffer(path, start_line, old_count, new_lines)
-		_server_script_revisions[path] = revision
-		if sender_id != 0:
-			for pid in network.peers:
-				if pid != sender_id and pid != 1:
-					rpc_id(pid, "apply_script_patch", path, start_line, old_count, new_lines, revision, checksum)
-
-	# 2. Standalone server does not have an editor UI
-	if network and (network.get("is_standalone_server") or DisplayServer.get_name() == "headless"):
+func script_edit_confirmed(path: String, rev: int, checksum: String):
+	var doc = _docs.get(path)
+	if not _from_server() or not doc or not doc.ready:
 		return
+	doc.rev = rev
+	doc.outstanding = doc.buffer
+	doc.buffer = null
+	if doc.outstanding != null:
+		_send_outstanding(path)
+	elif doc.closing:
+		_close_doc(path)
+	else:
+		_verify_doc(path, checksum)
 
-	# Deduplication & packet order guard: drop stale or duplicate packets immediately
-	var cur_rev = _script_revisions.get(path, 0)
-	if revision <= cur_rev:
+@rpc("any_peer", "reliable")
+func receive_script_edit(path: String, rev: int, op: Array, checksum: String):
+	var doc = _docs.get(path)
+	if not _from_server() or not doc or not doc.ready:
 		return
-	if cur_rev > 0 and revision > cur_rev + 1:
-		_request_script_if_needed(path)
+	# What's typed but not sent has to be accounted for first, or this edit lands in the wrong place
+	_flush_local_edits(path)
+	var base_length = TextOT.input_length(doc.outstanding) if doc.outstanding != null else doc.text.length()
+	if rev != doc.rev + 1 or TextOT.input_length(op) != base_length or not TextOT.is_valid(op):
+		_resync_doc(path)
 		return
+	doc.rev = rev
+	if doc.outstanding != null:
+		var outstanding_pair = TextOT.transform(doc.outstanding, op)
+		doc.outstanding = outstanding_pair[0]
+		op = outstanding_pair[1]
+	if doc.buffer != null:
+		var buffer_pair = TextOT.transform(doc.buffer, op)
+		doc.buffer = buffer_pair[0]
+		op = buffer_pair[1]
 
-	# 3. Apply to open editor if tracked
-	if not _tracked_editors.has(path):
-		# If script isn't open locally, just update stored lines so when opened it has them
-		_apply_patch_to_offline_lines(path, start_line, old_count, new_lines, revision, checksum)
+	var code_edit = _tracked_editors.get(path)
+	if is_instance_valid(code_edit):
+		_apply_op_to_editor(code_edit, doc.text, op)
+	doc.text = TextOT.apply(doc.text, op)
+	if doc.outstanding == null:
+		_verify_doc(path, checksum)
+	_clear_star_if_saved(path)
+
+# Copies can only be compared when nothing is on its way, and should never differ. If they do, the server's is the real one.
+func _verify_doc(path: String, checksum: String):
+	if _docs[path].text.md5_text() != checksum:
+		network.tc_print("Team Create: Script text went out of step, getting the server's copy: " + path)
+		_resync_doc(path)
+
+func _resync_doc(path: String):
+	var doc = _docs[path]
+	doc.ready = false
+	doc.outstanding = null
+	doc.buffer = null
+	_request_script_state(path)
+
+func _close_doc(path: String):
+	_docs.erase(path)
+	_pending_saved.erase(path)
+	_last_saved_by_peer.erase(path)
+	_saved_versions.erase(path)
+	_saved_checksums.erase(path)
+	if not (network and network.is_connected_to_session()):
 		return
+	if network.is_server:
+		_server_unsubscribe(path, _local_peer_id())
+	else:
+		rpc_id(1, "close_script_state", path)
 
-	var code_edit = _tracked_editors[path]
-	if not is_instance_valid(code_edit):
-		_tracked_editors.erase(path)
-		return
-
-	_applying_remote_depth += 1
-
-	var local_caret_line = code_edit.get_caret_line()
-	var local_caret_col = code_edit.get_caret_column()
-	var line_diff = new_lines.size() - old_count
-
-	# Apply line updates directly to CodeEdit
-	var common = min(old_count, new_lines.size())
-	for k in range(common):
-		var target_line = start_line + k
-		if target_line < code_edit.get_line_count():
-			code_edit.set_line(target_line, new_lines[k])
+# Edits are made one range at a time from the end, so the earlier positions stay correct. The editor moves carets and
+# selections itself. A caret at the exact spot stays in front of the new text, so two people typing at the same place
+# each keep their own words together.
+func _apply_op_to_editor(code_edit, text_before: String, op: Array):
+	var hunks = []
+	var position = 0
+	for step in op:
+		if step is String:
+			hunks.append([position, 0, step])
+		elif step > 0:
+			position += step
 		else:
-			var last = code_edit.get_line_count() - 1
-			if last >= 0:
-				code_edit.insert_text("\n" + new_lines[k], last, code_edit.get_line(last).length())
+			if not hunks.is_empty() and hunks[-1][0] + hunks[-1][1] == position:
+				hunks[-1][1] -= step
 			else:
-				code_edit.insert_text(new_lines[k], 0, 0)
+				hunks.append([position, -step, ""])
+			position -= step
+	if hunks.is_empty():
+		return
 
-	if old_count > new_lines.size():
-		for k in range(old_count - new_lines.size()):
-			if start_line + common < code_edit.get_line_count():
-				code_edit.remove_line_at(start_line + common)
-	elif new_lines.size() > old_count:
-		for k in range(common, new_lines.size()):
-			var target_line = start_line + k
-			if target_line < code_edit.get_line_count():
-				code_edit.insert_line_at(target_line, new_lines[k])
-			else:
-				var last = code_edit.get_line_count() - 1
-				if last >= 0:
-					code_edit.insert_text("\n" + new_lines[k], last, code_edit.get_line(last).length())
-				else:
-					code_edit.insert_text(new_lines[k], 0, 0)
+	var line_starts = PackedInt32Array([0])
+	var newline = text_before.find("\n")
+	while newline != -1:
+		line_starts.append(newline + 1)
+		newline = text_before.find("\n", newline + 1)
 
-	# Adjust local user caret offset if the remote edit occurred above the cursor
-	if start_line < local_caret_line:
-		var adjusted_line = clamp(local_caret_line + line_diff, 0, max(0, code_edit.get_line_count() - 1))
-		code_edit.set_caret_line(adjusted_line)
-		code_edit.set_caret_column(local_caret_col)
-	elif start_line == local_caret_line:
-		# Same line: clamp column so it does not exceed the line length
-		var line_len = code_edit.get_line(local_caret_line).length() if local_caret_line < code_edit.get_line_count() else 0
-		code_edit.set_caret_column(min(local_caret_col, line_len))
+	code_edit.begin_complex_operation()
+	for i in range(hunks.size() - 1, -1, -1):
+		var from_line = line_starts.bsearch(hunks[i][0], false) - 1
+		var from_column = hunks[i][0] - line_starts[from_line]
+		if hunks[i][1] > 0:
+			var end = hunks[i][0] + hunks[i][1]
+			var to_line = line_starts.bsearch(end, false) - 1
+			code_edit.remove_text(from_line, from_column, to_line, end - line_starts[to_line])
+		if hunks[i][2] != "":
+			code_edit.insert_text(hunks[i][2], from_line, from_column, true, false)
+	code_edit.end_complex_operation()
 
-	var updated_text = code_edit.get_text()
-	_synced_lines[path] = updated_text.split("\n")
-	_script_revisions[path] = revision
-	call_deferred("_decrement_applying_remote")
+	for overlay in _overlays.values():
+		if is_instance_valid(overlay) and overlay.code_edit == code_edit:
+			overlay.queue_redraw()
 
-	# Self-healing: verify local patched text matches sender's checksum
-	if checksum != "":
-		var local_md5 = updated_text.md5_text()
-		if local_md5 != checksum:
-			print_verbose("[TeamCreate] Script desync detected on " + path + ". Requesting authoritative server state...")
-			_request_script_if_needed(path)
+# The server is about to take this file. If it isn't what this editor saved, it was changed outside Godot, and the
+# tab should show that too, or the next edit here would overwrite it.
+# Godot won't save a tab whose file looks newer on disk, and asks about it in a dialog we hide.
+# Saying the script was saved updates the time the tab remembers without reloading it. That also
+# clears the star, so it goes back on if the tab has text the file doesn't.
+func refresh_disk_time(path: String):
+	var code_edit = _tracked_editors.get(path)
+	if not path.ends_with(".gd") or not is_instance_valid(code_edit):
+		return
+	var editor_node = EditorInterface.get_base_control().get_parent()
+	if not editor_node.has_signal("resource_saved"):
+		return
+	editor_node.resource_saved.emit(load(path))
+	var disk_text = FileAccess.get_file_as_string(path).replace("\r\n", "\n")
+	if code_edit.get_text().replace("\r\n", "\n") != disk_text:
+		var line = code_edit.get_line_count() - 1
+		var col = code_edit.get_line(line).length()
+		code_edit.begin_complex_operation()
+		code_edit.insert_text(" ", line, col, true, false)
+		code_edit.remove_text(line, col, line, col + 1)
+		code_edit.end_complex_operation()
+	_saved_versions[path] = code_edit.get_saved_version()
+	_saved_checksums[path] = disk_text.md5_text()
+	_saved_scripts[path] = code_edit.get_version() == code_edit.get_saved_version()
 
-	# Redraw presence overlay
-	if _overlays.has(path) and is_instance_valid(_overlays[path]):
-		_overlays[path].queue_redraw()
+func on_upload_requested(path: String, bytes: PackedByteArray):
+	var doc = _docs.get(path)
+	var code_edit = _tracked_editors.get(path)
+	if not doc or not doc.ready or doc.closing or not is_instance_valid(code_edit):
+		return
+	var text = bytes.get_string_from_utf8().replace("\r\n", "\n")
+	if _saved_checksums.has(path) and (_saved_checksums[path] == "" or _saved_checksums[path] == text.md5_text()):
+		return
+	_flush_local_edits(path)
+	if text != doc.text:
+		_apply_op_to_editor(code_edit, doc.text, TextOT.diff(doc.text, text))
+		_flush_local_edits(path)
+	refresh_disk_time(path)
 
-func _apply_patch_to_offline_lines(path: String, start_line: int, old_count: int, new_lines: PackedStringArray, revision: int, checksum: String = ""):
-	var lines = _synced_lines.get(path, PackedStringArray())
-	if lines.is_empty() and FileAccess.file_exists(path):
-		var f = FileAccess.open(path, FileAccess.READ)
-		if f:
-			lines = f.get_as_text().replace("\r\n", "\n").split("\n")
-			f.close()
+# ==============================================================================
+# Merged Text Editing: Server
+# ==============================================================================
 
-	var prefix = lines.slice(0, start_line)
-	var suffix = lines.slice(min(lines.size(), start_line + old_count))
-	var result = PackedStringArray()
-	result.append_array(prefix)
-	result.append_array(new_lines)
-	result.append_array(suffix)
-	_synced_lines[path] = result
-	_script_revisions[path] = revision
-	if checksum != "" and "\n".join(result).md5_text() != checksum:
-		_request_script_if_needed(path)
+# Delivers to a peer, which on a host can be its own editor
+func _send_to_peer(peer_id: int, method: String, args: Array):
+	if peer_id == _local_peer_id():
+		_local_delivery = true
+		callv(method, args)
+		_local_delivery = false
+	else:
+		callv("rpc_id", [peer_id, method] + args)
 
-func _apply_patch_to_server_buffer(path: String, start_line: int, old_count: int, new_lines: PackedStringArray):
-	var lines = _server_script_buffers.get(path, PackedStringArray())
-	if lines.is_empty() and FileAccess.file_exists(path):
-		var f = FileAccess.open(path, FileAccess.READ)
-		if f:
-			lines = f.get_as_text().replace("\r\n", "\n").split("\n")
-			f.close()
+func _server_doc(path: String, sender_text: String) -> Dictionary:
+	if not _server_docs.has(path):
+		var text = sender_text
+		if FileAccess.file_exists(path):
+			var f = FileAccess.open(path, FileAccess.READ)
+			if f:
+				text = f.get_as_text().replace("\r\n", "\n")
+				f.close()
+		_server_docs[path] = {"text": text, "rev": 0, "history": [], "subscribers": {}}
+	return _server_docs[path]
 
-	var prefix = lines.slice(0, start_line)
-	var suffix = lines.slice(min(lines.size(), start_line + old_count))
-	var result = PackedStringArray()
-	result.append_array(prefix)
-	result.append_array(new_lines)
-	result.append_array(suffix)
-	_server_script_buffers[path] = result
+func _is_session_peer(peer_id: int) -> bool:
+	return network and network.is_server and (peer_id == _local_peer_id() or network.peers.has(peer_id))
+
+@rpc("any_peer", "reliable")
+func submit_script_edit(path: String, base_rev: int, op: Array):
+	_server_submit(path, multiplayer.get_remote_sender_id(), base_rev, op)
+
+func _server_submit(path: String, sender_id: int, base_rev: int, op: Array):
+	var doc = _server_docs.get(path)
+	if not _is_session_peer(sender_id) or not _is_safe_script_path(path) or not doc or not doc.subscribers.has(sender_id):
+		return
+	# Sent against a version the server has forgotten, or one that can't exist
+	var first = doc.history.size() - (doc.rev - base_rev)
+	if first < 0 or first > doc.history.size() or not TextOT.is_valid(op):
+		_send_script_state(path, sender_id)
+		return
+	var base_length = TextOT.input_length(doc.history[first]) if first < doc.history.size() else doc.text.length()
+	if TextOT.input_length(op) != base_length:
+		_send_script_state(path, sender_id)
+		return
+	for i in range(first, doc.history.size()):
+		op = TextOT.transform(op, doc.history[i])[0]
+	_server_commit(path, op, sender_id)
+
+# Puts an edit that's already allowed for everything before it into the text, and tells everyone
+func _server_commit(path: String, op: Array, sender_id: int):
+	var doc = _server_docs[path]
+	doc.text = TextOT.apply(doc.text, op)
+	doc.rev += 1
+	doc.history.append(op)
+	if doc.history.size() > MAX_SCRIPT_HISTORY:
+		doc.history.pop_front()
 	_dirty_scripts[path] = true
+	var checksum = doc.text.md5_text()
+	for peer_id in doc.subscribers.keys():
+		if peer_id == sender_id:
+			_send_to_peer(peer_id, "script_edit_confirmed", [path, doc.rev, checksum])
+		else:
+			_send_to_peer(peer_id, "receive_script_edit", [path, doc.rev, op, checksum])
+
+func _send_script_state(path: String, peer_id: int):
+	var doc = _server_docs[path]
+	_send_to_peer(peer_id, "receive_script_state", [path, doc.text, doc.rev])
+
+func _server_unsubscribe(path: String, peer_id: int):
+	var doc = _server_docs.get(path)
+	if not doc:
+		return
+	doc.subscribers.erase(peer_id)
+	if doc.subscribers.is_empty():
+		_save_server_doc(path)
+		_dirty_scripts.erase(path)
+		_server_docs.erase(path)
+
+func on_peer_left(peer_id: int):
+	for path in _server_docs.keys():
+		_server_unsubscribe(path, peer_id)
+
+@rpc("any_peer", "reliable")
+func close_script_state(path: String):
+	if _is_session_peer(multiplayer.get_remote_sender_id()):
+		_server_unsubscribe(path, multiplayer.get_remote_sender_id())
+
+# A file from someone with the script open is just their save, and their typing reaches the server as edits. From
+# anyone else it was changed outside the editor, so it goes to everyone who has the script open.
+func on_file_received(path: String, bytes: PackedByteArray, sender_id: int):
+	var doc = _server_docs.get(path)
+	if not doc or bytes.is_empty():
+		return
+	var text = bytes.get_string_from_utf8().replace("\r\n", "\n")
+	if text == doc.text:
+		_dirty_scripts.erase(path)
+	elif doc.subscribers.has(sender_id):
+		_dirty_scripts[path] = true
+	else:
+		_server_commit(path, TextOT.diff(doc.text, text), 0)
+
+func _save_server_doc(path: String):
+	if not network or not network.get("is_standalone_server") or "::" in path or not _server_docs.has(path) or not _dirty_scripts.has(path):
+		return
+	var f = FileAccess.open(path, FileAccess.WRITE)
+	if f:
+		f.store_string(_server_docs[path].text)
+		f.close()
+	if network.file_sync:
+		network.file_sync._file_hash_cache.erase(path)
 
 func _save_dirty_server_scripts():
 	for path in _dirty_scripts.keys():
-		if _server_script_buffers.has(path):
-			var content = "\n".join(_server_script_buffers[path])
-			var f = FileAccess.open(path, FileAccess.WRITE)
-			if f:
-				f.store_string(content)
-				f.close()
+		_save_server_doc(path)
 	_dirty_scripts.clear()
 
 # ==============================================================================
@@ -463,7 +609,67 @@ func _broadcast_local_caret():
 	var my_id = multiplayer.get_unique_id()
 	_send_peer_caret(my_id, _active_script_path, line, col, has_sel, sel_from_line, sel_from_col, sel_to_line, sel_to_col)
 
-@rpc("any_peer", "unreliable")
+# Undoing to the saved text or saving only clears the star in the editor that did it, because
+# in every other editor the same text arrived as new edits.
+func _share_saved_states():
+	if not (network and network.is_connected_to_session()):
+		return
+	for path in _tracked_editors:
+		var code_edit = _tracked_editors[path]
+		if not is_instance_valid(code_edit):
+			continue
+		var saved = code_edit.get_version() == code_edit.get_saved_version()
+		if _saved_versions.get(path, -1) != code_edit.get_saved_version():
+			_saved_versions[path] = code_edit.get_saved_version()
+			# Empty when typing got in straight after the save, so what was saved is no longer known
+			_saved_checksums[path] = code_edit.get_text().replace("\r\n", "\n").md5_text() if saved else ""
+		var was_saved = _saved_scripts.get(path, saved)
+		_saved_scripts[path] = saved
+		if saved and not was_saved:
+			# The undo itself may still be waiting to go out
+			_diff_timers.erase(path)
+			_flush_local_edits(path)
+			var checksum = code_edit.get_text().md5_text()
+			if network.is_server:
+				for pid in network.peers:
+					if pid != 1:
+						rpc_id(pid, "script_back_to_saved", path, checksum)
+			elif multiplayer.get_unique_id() != 1:
+				rpc_id(1, "script_back_to_saved", path, checksum)
+
+@rpc("any_peer", "reliable")
+func script_back_to_saved(path: String, checksum: String):
+	if not _is_safe_script_path(path):
+		return
+	var sender_id = multiplayer.get_remote_sender_id() if multiplayer else 0
+	if network and network.is_server and sender_id != 0:
+		for pid in network.peers:
+			if pid != sender_id and pid != 1:
+				rpc_id(pid, "script_back_to_saved", path, checksum)
+
+	# The text may still be on its way, because the saver's last edit can be waiting for an earlier one to be confirmed
+	_pending_saved[path] = checksum
+	_last_saved_by_peer[path] = checksum
+	_clear_star_if_saved(path)
+
+func _clear_star_if_saved(path: String):
+	if not _pending_saved.has(path):
+		return
+	var code_edit = _tracked_editors.get(path)
+	if not is_instance_valid(code_edit) or code_edit.get_text().md5_text() != _pending_saved[path]:
+		return
+	_pending_saved.erase(path)
+	if path.ends_with(".gd") and network and network.file_sync:
+		# A tab without a star doesn't get saved when the game runs, so the file has to match it now
+		network.file_sync.write_saved_script(path, code_edit.get_text())
+		refresh_disk_time(path)
+	else:
+		code_edit.tag_saved_version()
+		_saved_scripts[path] = true
+	# The script editor only redraws its star when the text changes
+	code_edit.text_changed.emit()
+
+@rpc("any_peer", "reliable")
 func update_peer_script_caret(peer_id: int, path: String, line: int, col: int, has_sel: bool, sel_from_line: int, sel_from_col: int, sel_to_line: int, sel_to_col: int):
 	if peer_id == 0:
 		return
@@ -515,6 +721,8 @@ func update_peer_script_caret(peer_id: int, path: String, line: int, col: int, h
 		"time": Time.get_ticks_msec()
 	}
 	_peer_active_scripts[peer_id] = path
+	if network and network.scene_sync:
+		network.scene_sync.hold_frame_rate()
 
 	# Trigger redraw if we are viewing this script
 	if _overlays.has(path) and is_instance_valid(_overlays[path]):
@@ -532,54 +740,48 @@ func clear_peer_caret(peer_id: int):
 # Full State Synchronization on Script Open
 # ==============================================================================
 
-func _request_script_if_needed(path: String):
+func _request_script_state(path: String):
 	if path == "" or not (network and network.is_connected_to_session()):
 		return
-	if network and network.is_connected_to_session() and not network.is_server and multiplayer.get_unique_id() != 1:
-		rpc_id(1, "request_script_state", path)
+	# Only used if the server has no such file yet, such as a new script or one built into a scene
+	var code_edit = _tracked_editors.get(path)
+	var text = code_edit.get_text().replace("\r\n", "\n") if is_instance_valid(code_edit) else ""
+	if network.is_server:
+		_server_subscribe(path, _local_peer_id(), text)
+	else:
+		rpc_id(1, "request_script_state", path, text)
 
 @rpc("any_peer", "reliable")
-func request_script_state(path: String):
-	var sender_id = multiplayer.get_remote_sender_id() if multiplayer else 0
-	var text = ""
+func request_script_state(path: String, sender_text: String):
+	if not _is_safe_script_path(path):
+		printerr("Team Create: Blocked script request for invalid path: ", path)
+		return
+	if _is_session_peer(multiplayer.get_remote_sender_id()):
+		_server_subscribe(path, multiplayer.get_remote_sender_id(), sender_text)
 
-	if network and network.is_server:
-		if _server_script_buffers.has(path):
-			text = "\n".join(_server_script_buffers[path])
-		elif _tracked_editors.has(path) and is_instance_valid(_tracked_editors[path]):
-			text = _tracked_editors[path].get_text().replace("\r\n", "\n")
-		elif FileAccess.file_exists(path):
-			var f = FileAccess.open(path, FileAccess.READ)
-			if f:
-				text = f.get_as_text().replace("\r\n", "\n")
-				f.close()
-
-	var rev = _server_script_revisions.get(path, _script_revisions.get(path, 0))
-	rpc_id(sender_id, "receive_script_state", path, text, rev)
+func _server_subscribe(path: String, peer_id: int, sender_text: String):
+	_server_doc(path, sender_text).subscribers[peer_id] = true
+	_send_script_state(path, peer_id)
 
 @rpc("any_peer", "reliable")
 func receive_script_state(path: String, full_text: String, revision: int):
-	full_text = full_text.replace("\r\n", "\n")
-	_script_revisions[path] = revision
-	_synced_lines[path] = full_text.split("\n")
+	var doc = _docs.get(path)
+	if not _from_server() or not _is_safe_script_path(path) or not doc:
+		return
+	doc.text = full_text
+	doc.rev = revision
+	doc.outstanding = null
+	doc.buffer = null
+	doc.ready = true
+	doc.closing = false
+	doc.reloaded = false
 
-	if _tracked_editors.has(path):
-		var code_edit = _tracked_editors[path]
-		if is_instance_valid(code_edit):
-			_applying_remote_depth += 1
-			var local_line = code_edit.get_caret_line()
-			var local_col = code_edit.get_caret_column()
-			code_edit.set_text(full_text)
-			code_edit.set_caret_line(min(local_line, code_edit.get_line_count() - 1))
-			code_edit.set_caret_column(local_col)
-			call_deferred("_decrement_applying_remote")
-			if _overlays.has(path) and is_instance_valid(_overlays[path]):
-				_overlays[path].queue_redraw()
-
-func _decrement_applying_remote():
-	if is_inside_tree():
-		await get_tree().process_frame
-	_applying_remote_depth = max(0, _applying_remote_depth - 1)
+	var code_edit = _tracked_editors.get(path)
+	if is_instance_valid(code_edit):
+		var current = code_edit.get_text().replace("\r\n", "\n")
+		if current != full_text:
+			_apply_op_to_editor(code_edit, current, TextOT.diff(current, full_text))
+	_clear_star_if_saved(path)
 
 # ==============================================================================
 # Cleanup & Reset
@@ -594,9 +796,12 @@ func clear_all():
 	_tracked_editors.clear()
 	_peer_carets.clear()
 	_peer_active_scripts.clear()
-	_synced_lines.clear()
-	_script_revisions.clear()
-	_server_script_revisions.clear()
+	_docs.clear()
+	_server_docs.clear()
+	_pending_saved.clear()
+	_last_saved_by_peer.clear()
+	_saved_versions.clear()
+	_saved_checksums.clear()
 	_diff_timers.clear()
 	_dirty_scripts.clear()
 	_last_broadcast_caret.clear()

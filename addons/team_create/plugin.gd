@@ -19,8 +19,7 @@ func _enter_tree() -> void:
 	var network_script = load("res://addons/team_create/network.gd")
 
 	if ui_script == null or network_script == null:
-		printerr("Team Create failed to load core scripts! Attempting fallback update...")
-		download_update()
+		printerr("Team Create failed to load core scripts! Reinstall the plugin.")
 		return
 
 	var chat_script = load("res://addons/team_create/chat_window.gd")
