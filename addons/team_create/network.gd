@@ -23,6 +23,7 @@ var scene_sync
 var script_sync
 var settings_sync
 var deploy_sync
+var scene_check
 var test_runner
 var node_locks: Dictionary = {}
 var _recently_saved_scenes: Dictionary = {}
@@ -200,6 +201,12 @@ func _ready():
 		deploy_sync.name = "TeamCreateDeploySync"
 		deploy_sync.network = self
 		add_child(deploy_sync)
+	var scene_check_script = load("res://addons/team_create/scene_check.gd")
+	if scene_check_script:
+		scene_check = scene_check_script.new()
+		scene_check.name = "TeamCreateSceneCheck"
+		scene_check.network = self
+		add_child(scene_check)
 
 	var test_runner_script = load("res://addons/team_create/test_runner.gd")
 	if test_runner_script:
@@ -1358,11 +1365,15 @@ func disconnect_peer(manual: bool = false):
 	if file_sync:
 		file_sync._hide_sync_blocker()
 		file_sync._initial_sync_done = false
+		file_sync._synced_hashes.clear()
+		file_sync._synced_hashes_ready = false
 		file_sync.downloading_files.clear()
 		file_sync._has_unrelayed_files = false
 		file_sync._relay_timer_active = false
 		if file_sync.has_method("stop_http_server"):
 			file_sync.stop_http_server()
+	if scene_check:
+		scene_check.reset()
 	_heartbeat_accumulator = 0.0
 	server_ping = 0
 	if was_connected:
@@ -1806,6 +1817,7 @@ func _on_peer_disconnected(id: int):
 			scene_sync.release_all_locks_for_peer(id)
 	if script_sync and script_sync.has_method("clear_peer_caret"):
 		script_sync.clear_peer_caret(id)
+		script_sync.on_peer_left(id)
 
 	if is_server and is_connected_to_session():
 		var to_release = []
@@ -2756,25 +2768,17 @@ func node_lock_denied(node_id: String):
 func on_local_scene_saved(filepath: String):
 	_recently_saved_scenes[filepath] = Time.get_ticks_msec()
 	if multiplayer and multiplayer.has_multiplayer_peer() and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
-		if FileAccess.file_exists(filepath):
-			var bytes = FileAccess.get_file_as_bytes(filepath)
-			if is_server:
-				rpc("receive_manual_save", filepath, bytes)
-			elif is_connected_to_session() and multiplayer.get_unique_id() != 1:
-				rpc_id(1, "receive_manual_save", filepath, bytes)
+		if scene_sync and (is_server or (is_connected_to_session() and multiplayer.get_unique_id() != 1)):
+			scene_sync.on_local_scene_saved(filepath)
 
+# Only for a scene the server has no live copy of to save itself, such as a brand new one
 @rpc("any_peer", "reliable")
 func receive_manual_save(filepath: String, bytes: PackedByteArray):
-	var sender_id = multiplayer.get_remote_sender_id() if (multiplayer and is_inside_tree()) else 0
-	if not is_server and sender_id != 1 and sender_id != 0:
-		return # Clients only accept saves relayed by the server
+	if not is_server or not peers.has(multiplayer.get_remote_sender_id()):
+		return
 	if not file_sync or not file_sync.is_safe_scene_path(filepath):
 		printerr("Team Create: Blocked manual save to invalid path: ", filepath)
 		return
-	if is_server and sender_id != 0:
-		for pid in multiplayer.get_peers() if multiplayer else []:
-			if pid != sender_id:
-				rpc_id(pid, "receive_manual_save", filepath, bytes)
 
 	if bytes.size() > 0:
 		if file_sync and file_sync.has_method("backup_scene"):
@@ -2797,6 +2801,8 @@ func receive_manual_save(filepath: String, bytes: PackedByteArray):
 				DirAccess.remove_absolute(tmp_path)
 			if saved_ok:
 				tc_print("Team Create: Synchronized manual save from peer for: ", filepath)
+				file_sync._has_unrelayed_files = true
+				file_sync._schedule_relay_sync()
 		if is_standalone_server and scene_sync:
 			if scene_sync._server_tracked_scenes.has(filepath):
 				var s = scene_sync._server_tracked_scenes[filepath]
@@ -2806,27 +2812,8 @@ func receive_manual_save(filepath: String, bytes: PackedByteArray):
 			scene_sync._get_target_scene(filepath)
 		else:
 			var iface = _get_editor_interface()
-			if iface:
-				if iface.get_resource_filesystem():
-					iface.get_resource_filesystem().update_file(filepath)
-				var open_scenes = iface.get_open_scenes() if iface.has_method("get_open_scenes") else PackedStringArray()
-				if filepath in open_scenes and iface.has_method("reload_scene_from_path"):
-					var current_scene = iface.get_edited_scene_root() if iface.has_method("get_edited_scene_root") else null
-					var is_active = (current_scene and current_scene.scene_file_path == filepath)
-					var prev_path = current_scene.scene_file_path if current_scene else ""
-					if scene_sync:
-						if scene_sync.has_method("clear_all_peer_indicators"):
-							scene_sync.clear_all_peer_indicators()
-						scene_sync._is_reloading_scene = true
-						scene_sync._last_scene_path = filepath
-					iface.reload_scene_from_path(filepath)
-					if not is_active and prev_path != "" and iface.has_method("open_scene_from_path"):
-						iface.open_scene_from_path(prev_path)
-					if scene_sync:
-						get_tree().create_timer(0.5).timeout.connect(func():
-							if is_instance_valid(scene_sync):
-								scene_sync._is_reloading_scene = false
-						)
+			if iface and iface.get_resource_filesystem():
+				iface.get_resource_filesystem().update_file(filepath)
 
 func create_server_backup(target_path: String = ""):
 	var backed_up = []
