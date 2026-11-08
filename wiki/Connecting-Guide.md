@@ -64,4 +64,4 @@ Anyone who copies that saved file can join the server until the password is chan
 
 ## Encryption
 
-Connections are encrypted automatically, so there's nothing to set up. The password also proves you've reached the real server, so use one whenever you connect over the internet. Everyone needs the exact same copy of the plugin, and the server refuses to let you join if yours is different. If the server has a password, it offers you its copy, and you can update and restart with one click.
+Connections are encrypted automatically, so there's nothing to set up. The password also proves you've reached the real server, so use one whenever you connect over the internet. Everyone needs the exact same copy of the plugin, and the server refuses to let you join if yours is different. Make sure both the server and clients are running the same version of the plugin.

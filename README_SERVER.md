@@ -30,26 +30,11 @@ Set the `TEAM_CREATE_PASSWORD` environment variable before starting the server:
 
 Players type the same password into the **Server Password** box before clicking **Join**, and can tick **Remember Password** to save it and join by itself when that project opens. Everyone must have the exact same copy of the plugin, and the server refuses to let anyone with a different copy join.
 
-**To update everyone, update the plugin on the server.** On a server with a password, anyone joining with a different copy is offered the server's copy once their password is accepted. If they accept, it's checked, installed, and the editor restarts. This installs code from the server onto their machine, which is another reason to only share the password with people you fully trust. Copies from before this feature can't update themselves, and on a server with no password people have to install the new copy by hand.
-
 Use a long random password. After 5 wrong attempts, an address is blocked for 5 minutes.
 
 Traffic is always encrypted, using a certificate the server generates when it starts, so there's nothing to set up. The password is what proves you've reached the real server, so a server with no password is encrypted but its identity can't be checked.
 
 The password keeps strangers out, but anyone who has it can still change project files and run code on the server through a scene's scripts, so only share it with people you fully trust.
-
-## Deploy to Website
-
-A dedicated server can give everyone in the session a **Deploy to Website** button that publishes the project's current saved state, for example to a site hosting your web export. Without this setup, the button doesn't appear.
-
-The plugin only passes the request along. [`tools/site_deploy.sh`](tools/site_deploy.sh) does the work, running on the server machine but outside any container, so the server itself never needs network access or upload credentials. It copies the project, leaves out the Team Create plugin, exports it and uploads the result with `rsync`. If the export fails or produces nothing, the site isn't changed.
-
-1. Create `deploy.env` in the base folder (`/srv/team-create` by default, or set `DEPLOY_BASE`), with `SITE=user@host:/var/www/mygame/`. The comments at the top of the script list the other settings.
-2. Create `deploy/request`, writable by the server's user, and `deploy/status`, writable by the user running the script and readable by the server.
-3. Keep `tools/site_deploy.sh` running, with Godot and its export templates installed for that user.
-4. Start the server with `TEAM_CREATE_DEPLOY_DIR` set to the folder containing `request` and `status`.
-
-Anyone who has the server password can press the button, and it replaces the live site for everyone playing.
 
 
 ## Project Settings
