@@ -982,12 +982,10 @@ func write_saved_script(path: String, text: String):
 	var checksum = _md5_of_bytes(bytes)
 	if not FileAccess.file_exists(path) or _get_cached_md5(path) != checksum:
 		_file_write_mutex.lock()
-		var file = FileAccess.open(path + ".tmp", FileAccess.WRITE)
+		var file = FileAccess.open(path, FileAccess.WRITE)
 		if file:
 			file.store_buffer(bytes)
 			file.close()
-			if DirAccess.remove_absolute(path) == OK or not FileAccess.file_exists(path):
-				DirAccess.rename_absolute(path + ".tmp", path)
 		_file_write_mutex.unlock()
 		_file_hash_cache.erase(path)
 	_synced_hashes[path] = checksum
@@ -1080,21 +1078,10 @@ func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_fin
 			if bytes.size() > 0:
 				backup_scene(path)
 				_file_write_mutex.lock()
-				var tmp_path = path + ".tmp"
-				var file = FileAccess.open(tmp_path, FileAccess.WRITE)
-				var saved_ok = false
+				var file = FileAccess.open(path, FileAccess.WRITE)
 				if file:
 					file.store_buffer(bytes)
 					file.close()
-					if DirAccess.remove_absolute(path) == OK or not FileAccess.file_exists(path):
-						if DirAccess.rename_absolute(tmp_path, path) == OK:
-							saved_ok = true
-					if not saved_ok:
-						file = FileAccess.open(path, FileAccess.WRITE)
-						if file:
-							file.store_buffer(bytes)
-							file.close()
-						DirAccess.remove_absolute(tmp_path)
 				_file_write_mutex.unlock()
 
 			if network and network.scene_sync:
@@ -1108,8 +1095,12 @@ func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_fin
 			ei.reload_scene_from_path(path)
 
 			if not is_active and prev_path != "":
-				# reload_scene_from_path might change the active tab, so we switch back just in case
-				ei.open_scene_from_path(prev_path)
+				# reload_scene_from_path alters tab data in Godot 4.8; switch back deferred
+				# to prevent out-of-bounds tab index crash (CowData::get)
+				Callable(func():
+					if is_instance_valid(ei):
+						ei.open_scene_from_path(prev_path)
+				).call_deferred()
 
 			get_tree().create_timer(0.5).timeout.connect(func():
 				if is_instance_valid(network) and network.scene_sync:
@@ -1152,12 +1143,10 @@ func receive_file(path: String, transfer_id: int, bytes: PackedByteArray, is_fin
 				if network and network.scene_sync and not network.is_server:
 					network.scene_sync.prepare_offline_scene_merge(path, bytes)
 			_file_write_mutex.lock()
-			var file = FileAccess.open(path + ".tmp", FileAccess.WRITE)
+			var file = FileAccess.open(path, FileAccess.WRITE)
 			if file:
 				file.store_buffer(bytes)
 				file.close()
-				if DirAccess.remove_absolute(path) == OK or not FileAccess.file_exists(path):
-					DirAccess.rename_absolute(path + ".tmp", path)
 				network.tc_print("Received and updated file: ", path)
 			_file_write_mutex.unlock()
 			if network and network.script_sync and not network.is_server:

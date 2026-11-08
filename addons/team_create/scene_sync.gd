@@ -3017,7 +3017,7 @@ func update_peer_cursor_3d(peer_id: int, pos: Transform3D, scene_path: String = 
 	if active_path == "" and active_scene:
 		active_path = active_scene.get_meta("scene_file_path", "")
 
-	if not active_scene or (scene_path != "" and active_path != "" and active_path != scene_path):
+	if not active_scene or (scene_path != "" and active_path != "" and active_path.to_lower() != scene_path.to_lower()):
 		_clear_peer_cursor(peer_id)
 		return
 
@@ -3047,7 +3047,7 @@ func update_peer_cursor_2d(peer_id: int, pos: Vector2, scene_path: String = ""):
 	if active_path == "" and active_scene:
 		active_path = active_scene.get_meta("scene_file_path", "")
 
-	if not active_scene or (scene_path != "" and active_path != "" and active_path != scene_path):
+	if not active_scene or (scene_path != "" and active_path != "" and active_path.to_lower() != scene_path.to_lower()):
 		_clear_peer_cursor(peer_id)
 		return
 
@@ -3070,10 +3070,11 @@ func _get_or_create_peer_cursor_3d(peer_id: int, current_scene: Node) -> Node3D:
 	var tree = current_scene.get_tree() if (is_instance_valid(current_scene) and current_scene.is_inside_tree()) else null
 	if tree:
 		var nodes = tree.get_nodes_in_group(group_name)
-		if nodes.size() > 0 and is_instance_valid(nodes[0]):
-			_peer_cursors_3d[peer_id] = nodes[0]
-			return nodes[0]
-	elif _peer_cursors_3d.has(peer_id) and is_instance_valid(_peer_cursors_3d[peer_id]):
+		for node in nodes:
+			if is_instance_valid(node) and not node.is_queued_for_deletion():
+				_peer_cursors_3d[peer_id] = node
+				return node
+	elif _peer_cursors_3d.has(peer_id) and is_instance_valid(_peer_cursors_3d[peer_id]) and not _peer_cursors_3d[peer_id].is_queued_for_deletion():
 		return _peer_cursors_3d[peer_id]
 
 	var cursor = Node3D.new()
@@ -3146,10 +3147,11 @@ func _get_or_create_peer_cursor_2d(peer_id: int, current_scene: Node) -> Node2D:
 	var tree = current_scene.get_tree() if (is_instance_valid(current_scene) and current_scene.is_inside_tree()) else null
 	if tree:
 		var nodes = tree.get_nodes_in_group(group_name)
-		if nodes.size() > 0 and is_instance_valid(nodes[0]):
-			_peer_cursors_2d[peer_id] = nodes[0]
-			return nodes[0]
-	elif _peer_cursors_2d.has(peer_id) and is_instance_valid(_peer_cursors_2d[peer_id]):
+		for node in nodes:
+			if is_instance_valid(node) and not node.is_queued_for_deletion():
+				_peer_cursors_2d[peer_id] = node
+				return node
+	elif _peer_cursors_2d.has(peer_id) and is_instance_valid(_peer_cursors_2d[peer_id]) and not _peer_cursors_2d[peer_id].is_queued_for_deletion():
 		return _peer_cursors_2d[peer_id]
 
 	var cursor = Node2D.new()
@@ -3247,11 +3249,13 @@ func _clear_peer_cursor(peer_id: int):
 	_clear_peer_cursor_2d(peer_id, current_scene)
 
 func _clear_peer_cursor_3d(peer_id: int, current_scene: Node):
+	_peer_cursors_3d.erase(peer_id)
 	var group_name = _get_cursor_3d_group_name(peer_id)
 	for node in current_scene.get_tree().get_nodes_in_group(group_name):
 		if is_instance_valid(node): node.queue_free()
 
 func _clear_peer_cursor_2d(peer_id: int, current_scene: Node):
+	_peer_cursors_2d.erase(peer_id)
 	var group_name = _get_cursor_2d_group_name(peer_id)
 	for node in current_scene.get_tree().get_nodes_in_group(group_name):
 		if is_instance_valid(node): node.queue_free()
@@ -3340,6 +3344,19 @@ func _find_editor_camera_3d(node: Node) -> Camera3D:
 	return null
 
 
+func _get_editor_root_control() -> Control:
+	var ei = _get_editor_interface()
+	if not ei: return null
+	if ei.has_method("get_base_control"):
+		var bc = ei.get_base_control()
+		if is_instance_valid(bc) and bc.is_inside_tree():
+			return bc
+	if ei.has_method("get_editor_main_screen"):
+		var ms = ei.get_editor_main_screen()
+		if is_instance_valid(ms) and ms.is_inside_tree():
+			return ms
+	return null
+
 var _cached_3d_viewport: Node = null
 var _cached_2d_viewport: Control = null
 var _cached_3d_camera: Camera3D = null
@@ -3348,17 +3365,14 @@ func _get_local_cursor_data() -> Dictionary:
 	var result = {"has_3d": false, "pos_3d": Transform3D(), "has_2d": false, "pos_2d": Vector2.ZERO}
 	if DisplayServer.get_name() == "headless" or (network and network.get("is_standalone_server")):
 		return result
-	var ei = _get_editor_interface()
-	if not ei or not ei.has_method("get_editor_main_screen"): return result
-
-	var main_screen = ei.get_editor_main_screen()
-	if not is_instance_valid(main_screen) or not main_screen.is_inside_tree(): return result
+	var root_control = _get_editor_root_control()
+	if not root_control: return result
 
 	# 3D Editor Viewport
-	if not is_instance_valid(_cached_3d_viewport):
-		_cached_3d_viewport = _find_editor_viewport(main_screen, "Node3DEditorViewport")
+	if not is_instance_valid(_cached_3d_viewport) or not _cached_3d_viewport.is_inside_tree():
+		_cached_3d_viewport = _find_editor_viewport(root_control, "Node3DEditorViewport")
 	if is_instance_valid(_cached_3d_viewport) and _cached_3d_viewport is CanvasItem and _cached_3d_viewport.is_visible_in_tree():
-		if not is_instance_valid(_cached_3d_camera):
+		if not is_instance_valid(_cached_3d_camera) or not _cached_3d_camera.is_inside_tree():
 			_cached_3d_camera = _find_editor_camera_3d(_cached_3d_viewport)
 		var cam = _cached_3d_camera
 		if is_instance_valid(cam):
@@ -3366,8 +3380,8 @@ func _get_local_cursor_data() -> Dictionary:
 			result["pos_3d"] = cam.global_transform
 
 	# 2D Editor Viewport
-	if not is_instance_valid(_cached_2d_viewport):
-		_cached_2d_viewport = _find_editor_viewport(main_screen, "CanvasItemEditorViewport")
+	if not is_instance_valid(_cached_2d_viewport) or not _cached_2d_viewport.is_inside_tree():
+		_cached_2d_viewport = _find_editor_viewport(root_control, "CanvasItemEditorViewport")
 
 	if is_instance_valid(_cached_2d_viewport) and _cached_2d_viewport is CanvasItem and _cached_2d_viewport.is_visible_in_tree():
 		var mouse_pos = _cached_2d_viewport.get_local_mouse_position()
@@ -4040,15 +4054,12 @@ func restore_camera_for_scene(scene_path: String):
 	)
 	var target_transform = Transform3D(basis, origin)
 
-	var ei = _get_editor_interface()
-	if not ei or not ei.has_method("get_editor_main_screen"):
-		return
-	var main_screen = ei.get_editor_main_screen()
-	if not is_instance_valid(main_screen) or not main_screen.is_inside_tree():
+	var root_control = _get_editor_root_control()
+	if not root_control:
 		return
 
 	if not is_instance_valid(_cached_3d_viewport) or not _cached_3d_viewport.is_inside_tree():
-		_cached_3d_viewport = _find_editor_viewport(main_screen, "Node3DEditorViewport")
+		_cached_3d_viewport = _find_editor_viewport(root_control, "Node3DEditorViewport")
 	if is_instance_valid(_cached_3d_viewport):
 		if not is_instance_valid(_cached_3d_camera) or not _cached_3d_camera.is_inside_tree():
 			_cached_3d_camera = _find_editor_camera_3d(_cached_3d_viewport)
